@@ -49,7 +49,7 @@ class ChatRequest(BaseModel):
         description="Optional document ID if conversation is scoped to an uploaded PDF"
     )
     include_audio: bool = Field(
-        default=False,
+        default=True,
         description="Whether to generate and return text-to-speech audio for the answer"
     )
 

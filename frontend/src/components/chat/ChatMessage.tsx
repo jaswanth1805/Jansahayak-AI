@@ -18,8 +18,11 @@ import {
   Sparkles,
   ExternalLink,
   CheckCircle2,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
+import { useLanguage } from "@/context/LanguageContext";
 
 interface ChatMessageProps {
   message: ExtendedChatMessage;
@@ -34,8 +37,39 @@ export function ChatMessage({
   onPlayAudio,
   isPlayingAudio = false,
 }: ChatMessageProps) {
+  const { language } = useLanguage();
   const [copied, setCopied] = useState(false);
+  const [localAudioUrl, setLocalAudioUrl] = useState<string | null>(message.audio_url || null);
+  const [isSynthesizing, setIsSynthesizing] = useState(false);
   const isUser = message.role === "user";
+
+  const handleAudioToggle = async () => {
+    if (isPlayingAudio) {
+      if (onPlayAudio) onPlayAudio("");
+      return;
+    }
+
+    const currentUrl = localAudioUrl || message.audio_url;
+    if (currentUrl) {
+      if (onPlayAudio) onPlayAudio(currentUrl);
+      return;
+    }
+
+    // Synthesize audio on demand if not pre-generated
+    try {
+      setIsSynthesizing(true);
+      const res = await api.synthesizeSpeech(message.content, language);
+      if (res && res.audio_url) {
+        setLocalAudioUrl(res.audio_url);
+        message.audio_url = res.audio_url;
+        if (onPlayAudio) onPlayAudio(res.audio_url);
+      }
+    } catch (e) {
+      console.error("Audio synthesis error:", e);
+    } finally {
+      setIsSynthesizing(false);
+    }
+  };
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -84,11 +118,27 @@ export function ChatMessage({
             <span className="font-semibold">
               {isUser ? "You" : "JanSahayak AI"}
             </span>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               {formattedTime && <span>{formattedTime}</span>}
+              {!isUser && (
+                <button
+                  onClick={handleAudioToggle}
+                  disabled={isSynthesizing}
+                  className="p-1 hover:bg-slate-100 rounded text-indigo-700 transition"
+                  title={isPlayingAudio ? "Stop Audio" : "Listen to answer (Voice)"}
+                >
+                  {isSynthesizing ? (
+                    <Loader2 className="h-3.5 w-3.5 text-indigo-600 animate-spin" />
+                  ) : isPlayingAudio ? (
+                    <VolumeX className="h-3.5 w-3.5 text-indigo-600 animate-pulse" />
+                  ) : (
+                    <Volume2 className="h-3.5 w-3.5 text-indigo-600 hover:scale-110" />
+                  )}
+                </button>
+              )}
               <button
                 onClick={handleCopy}
-                className="opacity-0 group-hover:opacity-100 transition p-0.5 hover:bg-black/10 rounded"
+                className="opacity-0 group-hover:opacity-100 transition p-1 hover:bg-black/10 rounded"
                 title="Copy response"
               >
                 {copied ? (
@@ -124,17 +174,28 @@ export function ChatMessage({
             </ReactMarkdown>
           </div>
 
-          {/* Audio Player Control if available */}
-          {!isUser && message.audio_url && (
+          {/* Audio Player Control Bar - Always Visible on Bot Messages */}
+          {!isUser && (
             <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => onPlayAudio && onPlayAudio(message.audio_url!)}
-                  className="h-7 px-2.5 text-xs gap-1.5 border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                  onClick={handleAudioToggle}
+                  disabled={isSynthesizing}
+                  className={cn(
+                    "h-7 px-2.5 text-xs gap-1.5 font-medium transition",
+                    isPlayingAudio
+                      ? "bg-indigo-50 border-indigo-300 text-indigo-800 animate-pulse"
+                      : "border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300"
+                  )}
                 >
-                  {isPlayingAudio ? (
+                  {isSynthesizing ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 text-indigo-600 animate-spin" />
+                      <span>Generating Audio...</span>
+                    </>
+                  ) : isPlayingAudio ? (
                     <>
                       <VolumeX className="h-3.5 w-3.5 text-indigo-600" />
                       <span>Stop Listening</span>
@@ -142,12 +203,12 @@ export function ChatMessage({
                   ) : (
                     <>
                       <Volume2 className="h-3.5 w-3.5 text-indigo-600" />
-                      <span>Listen to Answer</span>
+                      <span>Listen to Answer (Voice)</span>
                     </>
                   )}
                 </Button>
-                <span className="text-[11px] text-muted-foreground">
-                  Voice Synthesis
+                <span className="text-[11px] text-slate-500">
+                  Multilingual Speech
                 </span>
               </div>
             </div>

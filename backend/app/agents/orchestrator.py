@@ -324,16 +324,15 @@ class JanSahayakOrchestrator:
             step_desc = f"Generated official scheme explanation in {LANGUAGE_NAMES.get(lang_code, 'English')}."
             return {"final_answer": answer, "agent_steps": [step_desc]}
 
-        # Case 3: General or No Scheme Found
-        fallback_msg = (
-            "We could not locate a specific central or state government scheme matching your query in the official database. "
-            "Please check the spelling or search by sector (e.g. 'farmers', 'housing', 'healthcare', 'pension')."
+        # Case 3: General or No Specific Scheme Found
+        answer = await self.llm.generate_rag_response(
+            question=state["user_message"],
+            context_passages=[],
+            language=lang_code,
+            system_context="Provide helpful, empathetic, conversational public-welfare guidance in India for this citizen inquiry."
         )
-        if lang_code != "en":
-            fallback_msg = translate_text(fallback_msg, target_language=lang_code)
-
-        step_desc = "Completed workflow with general guidance."
-        return {"final_answer": fallback_msg, "agent_steps": [step_desc]}
+        step_desc = f"Generated conversational public-welfare guidance in {LANGUAGE_NAMES.get(lang_code, 'English')}."
+        return {"final_answer": answer, "agent_steps": [step_desc]}
 
     async def _node_generate_suggestions(self, state: AgentState) -> Dict[str, Any]:
         """Generate 3 contextual follow-up questions for the citizen."""
