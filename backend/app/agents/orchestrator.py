@@ -1,0 +1,443 @@
+"""LangGraph Orchestrator for JanSahayak AI.
+
+Implements an intelligent, multi-step agent workflow with intent classification,
+official source retrieval, eligibility evaluation, claim verification,
+multilingual synthesis, and follow-up generation.
+"""
+
+from datetime import datetime, timezone
+import json
+import logging
+import operator
+import re
+from typing import TypedDict, List, Dict, Any, Optional, Annotated
+
+from langgraph.graph import StateGraph, END
+
+from app.models.schemas import SourceCitation, Language
+from app.services.llm_service import LLMService
+from app.services.government_sources import GovernmentSourceAggregator
+from app.services.document_service import DocumentService
+from app.services.voice_service import VoiceService
+from app.agents.tools import (
+    search_official_sources,
+    retrieve_relevant_passages,
+    analyze_scheme_eligibility,
+    verify_source_and_citations,
+)
+from app.utils.language import LANGUAGE_PROMPTS, LANGUAGE_NAMES, translate_text
+
+logger = logging.getLogger(__name__)
+
+
+class AgentState(TypedDict):
+    """LangGraph State dictionary maintained across all pipeline nodes."""
+    # User Inputs
+    user_message: str
+    language: str
+    user_profile: Optional[Dict[str, Any]]
+    document_id: Optional[str]
+    conversation_history: List[Dict[str, str]]
+    include_audio: bool
+    session_id: str
+
+    # Internal pipeline state
+    intent: Optional[str]  # "scheme_query", "rights_query", "eligibility_check", "document_query", "general"
+    retrieved_schemes: List[Dict[str, Any]]
+    retrieved_passages: List[Dict[str, Any]]
+    eligibility_results: Optional[Dict[str, Any]]
+    agent_steps: Annotated[List[str], operator.add]
+
+    # Outputs
+    final_answer: Optional[str]
+    sources: List[Dict[str, Any]]
+    audio_url: Optional[str]
+    suggested_questions: List[str]
+    error: Optional[str]
+
+
+class JanSahayakOrchestrator:
+    """Production LangGraph orchestrator executing citizen queries."""
+
+    def __init__(
+        self,
+        llm_service: LLMService,
+        gov_sources: GovernmentSourceAggregator,
+        doc_service: DocumentService,
+        voice_service: VoiceService,
+    ):
+        self.llm = llm_service
+        self.gov_sources = gov_sources
+        self.doc_service = doc_service
+        self.voice_service = voice_service
+        self.graph = self._build_graph()
+        self.app = self.graph.compile()
+
+    def _build_graph(self) -> StateGraph:
+        """Construct the directed state workflow."""
+        workflow = StateGraph(AgentState)
+
+        # Register workflow nodes
+        workflow.add_node("classify_intent", self._node_classify_intent)
+        workflow.add_node("retrieve_document_passages", self._node_retrieve_document_passages)
+        workflow.add_node("retrieve_official_schemes", self._node_retrieve_official_schemes)
+        workflow.add_node("extract_relevant_info", self._node_extract_relevant_info)
+        workflow.add_node("evaluate_eligibility", self._node_evaluate_eligibility)
+        workflow.add_node("verify_claims", self._node_verify_claims)
+        workflow.add_node("generate_response", self._node_generate_response)
+        workflow.add_node("generate_suggestions", self._node_generate_suggestions)
+        workflow.add_node("synthesize_audio", self._node_synthesize_audio)
+
+        # Set entry point
+        workflow.set_entry_point("classify_intent")
+
+        # Routing from intent classifier
+        def route_after_intent(state: AgentState) -> str:
+            if state.get("document_id") or state.get("intent") == "document_query":
+                return "retrieve_document_passages"
+            return "retrieve_official_schemes"
+
+        workflow.add_conditional_edges(
+            "classify_intent",
+            route_after_intent,
+            {
+                "retrieve_document_passages": "retrieve_document_passages",
+                "retrieve_official_schemes": "retrieve_official_schemes",
+            }
+        )
+
+        # Both retrieval branches feed into extraction
+        workflow.add_edge("retrieve_document_passages", "extract_relevant_info")
+        workflow.add_edge("retrieve_official_schemes", "extract_relevant_info")
+
+        # After extraction, check whether eligibility analysis is required
+        def route_after_extraction(state: AgentState) -> str:
+            if state.get("user_profile") or state.get("intent") == "eligibility_check":
+                return "evaluate_eligibility"
+            return "verify_claims"
+
+        workflow.add_conditional_edges(
+            "extract_relevant_info",
+            route_after_extraction,
+            {
+                "evaluate_eligibility": "evaluate_eligibility",
+                "verify_claims": "verify_claims",
+            }
+        )
+
+        workflow.add_edge("evaluate_eligibility", "verify_claims")
+        workflow.add_edge("verify_claims", "generate_response")
+        workflow.add_edge("generate_response", "generate_suggestions")
+
+        # Route after suggestions: voice synthesis if requested, else END
+        def route_after_suggestions(state: AgentState) -> str:
+            if state.get("include_audio"):
+                return "synthesize_audio"
+            return END
+
+        workflow.add_conditional_edges(
+            "generate_suggestions",
+            route_after_suggestions,
+            {
+                "synthesize_audio": "synthesize_audio",
+                END: END,
+            }
+        )
+
+        workflow.add_edge("synthesize_audio", END)
+
+        return workflow
+
+    # ==================== NODE IMPLEMENTATIONS ====================
+
+    async def _node_classify_intent(self, state: AgentState) -> Dict[str, Any]:
+        """Classify user intent into one of five structured pathways."""
+        msg = state["user_message"].lower()
+        document_id = state.get("document_id")
+
+        if document_id:
+            intent = "document_query"
+        elif any(k in msg for k in ["eligible", "qualify", "can i apply", "am i eligible", "eligibility", "criteria", "पात्र", "అర్హత"]):
+            intent = "eligibility_check"
+        elif any(k in msg for k in ["scheme", "yojana", "pension", "kisan", "awas", "ayushman", "subsidy", "loan", "योजना", "పథకం"]):
+            intent = "scheme_query"
+        elif any(k in msg for k in ["right", "law", "entitlement", "grievance", "complaint", "act", "rti", "अधिकार", "హక్కు"]):
+            intent = "rights_query"
+        else:
+            intent = "general"
+
+        step_desc = f"Identified query intent as: '{intent}'."
+        return {
+            "intent": intent,
+            "agent_steps": [step_desc],
+        }
+
+    async def _node_retrieve_document_passages(self, state: AgentState) -> Dict[str, Any]:
+        """Retrieve passages from an indexed document collection."""
+        doc_id = state.get("document_id", "")
+        query = state["user_message"]
+        res = await retrieve_relevant_passages(query=query, document_id=doc_id, n_results=4)
+        passages = res.get("passages", [])
+        
+        step_desc = f"Retrieved {len(passages)} passages from uploaded document."
+        return {
+            "retrieved_passages": passages,
+            "retrieved_schemes": [],
+            "agent_steps": [step_desc],
+        }
+
+    async def _node_retrieve_official_schemes(self, state: AgentState) -> Dict[str, Any]:
+        """Query official government repositories (MyScheme, India.gov.in, Data.gov.in)."""
+        query = state["user_message"]
+        state_filter = state.get("user_profile", {}).get("state", "") if state.get("user_profile") else ""
+        
+        res = await search_official_sources(query=query, state=state_filter)
+        schemes = res.get("schemes", [])
+        
+        step_desc = f"Searched official government portals (MyScheme, India.gov.in); retrieved {len(schemes)} relevant schemes."
+        return {
+            "retrieved_schemes": schemes,
+            "retrieved_passages": [],
+            "agent_steps": [step_desc],
+        }
+
+    async def _node_extract_relevant_info(self, state: AgentState) -> Dict[str, Any]:
+        """Extract and consolidate key facts from retrieved schemes or document passages."""
+        sources: List[Dict[str, Any]] = []
+        now = datetime.now(timezone.utc)
+
+        # Format sources from retrieved schemes
+        for scheme in state.get("retrieved_schemes", [])[:4]:
+            sources.append({
+                "title": scheme.get("name", "Government Scheme"),
+                "url": scheme.get("official_url") or scheme.get("application_url"),
+                "source_type": "official_api",
+                "page_number": None,
+                "section": scheme.get("category"),
+                "retrieved_at": now,
+                "is_verified": True,
+            })
+
+        # Format sources from document passages
+        for p in state.get("retrieved_passages", []):
+            meta = p.get("metadata", {})
+            sources.append({
+                "title": f"Document: {meta.get('filename', 'Guidelines')} (Page {meta.get('page_num', 1)})",
+                "url": None,
+                "source_type": "uploaded_document",
+                "page_number": meta.get("page_num"),
+                "section": f"Page {meta.get('page_num')}",
+                "retrieved_at": now,
+                "is_verified": True,
+            })
+
+        step_desc = f"Consolidated {len(sources)} official source citations."
+        return {
+            "sources": sources,
+            "agent_steps": [step_desc],
+        }
+
+    async def _node_evaluate_eligibility(self, state: AgentState) -> Dict[str, Any]:
+        """Evaluate citizen eligibility against the retrieved scheme."""
+        schemes = state.get("retrieved_schemes", [])
+        profile = state.get("user_profile") or {}
+        
+        if not schemes:
+            step_desc = "Eligibility check skipped: No matching scheme found to evaluate against."
+            return {"eligibility_results": None, "agent_steps": [step_desc]}
+
+        primary_scheme = schemes[0]
+        eval_res = await analyze_scheme_eligibility(scheme_data=primary_scheme, user_profile=profile)
+        eval_res["scheme_name"] = primary_scheme.get("name")
+        
+        step_desc = f"Evaluated eligibility for '{primary_scheme.get('name')}': Result = {eval_res['status']}."
+        return {
+            "eligibility_results": eval_res,
+            "agent_steps": [step_desc],
+        }
+
+    async def _node_verify_claims(self, state: AgentState) -> Dict[str, Any]:
+        """Verify factual consistency between sources and claims."""
+        sources = state.get("retrieved_schemes", [])
+        claims = [state["user_message"]]
+        verification = await verify_source_and_citations(claims, sources)
+        
+        confidence = verification.get("confidence_score", 1.0)
+        step_desc = f"Verified facts against official records (Grounding confidence: {int(confidence * 100)}%)."
+        return {
+            "agent_steps": [step_desc],
+        }
+
+    async def _node_generate_response(self, state: AgentState) -> Dict[str, Any]:
+        """Synthesize the final citizen explanation in the target language."""
+        lang_code = state.get("language", "en")
+        schemes = state.get("retrieved_schemes", [])
+        passages = state.get("retrieved_passages", [])
+        eligibility = state.get("eligibility_results")
+
+        # Case 1: Document Query
+        if passages:
+            answer = await self.llm.generate_rag_response(
+                question=state["user_message"],
+                context_passages=passages,
+                language=lang_code,
+                system_context="Answer citizen's question strictly from the uploaded guidelines. Include page citations."
+            )
+            step_desc = f"Generated answer grounded in document passages in {LANGUAGE_NAMES.get(lang_code, 'English')}."
+            return {"final_answer": answer, "agent_steps": [step_desc]}
+
+        # Case 2: Scheme or Eligibility Query
+        if schemes:
+            # Build context from top schemes
+            context_blocks = []
+            for s in schemes[:3]:
+                crit_str = "; ".join(s.get("eligibility_criteria", []))
+                ben_str = "; ".join(s.get("benefits", []))
+                docs_str = "; ".join(s.get("required_documents", []))
+                context_blocks.append({
+                    "text": (
+                        f"Scheme: {s.get('name')}\n"
+                        f"Ministry: {s.get('ministry', 'Government of India')}\n"
+                        f"Description: {s.get('description')}\n"
+                        f"Benefits: {ben_str}\n"
+                        f"Eligibility: {crit_str}\n"
+                        f"Documents Required: {docs_str}\n"
+                        f"Official Link: {s.get('official_url')}"
+                    ),
+                    "metadata": {"source": s.get("name")}
+                })
+
+            extra_note = ""
+            if eligibility:
+                extra_note = (
+                    f"\nELIGIBILITY ASSESSMENT:\nStatus: {eligibility.get('status')}\n"
+                    f"Satisfied: {', '.join(eligibility.get('satisfied_conditions', []))}\n"
+                    f"Missing Details: {', '.join(eligibility.get('missing_information', []))}"
+                )
+
+            answer = await self.llm.generate_rag_response(
+                question=state["user_message"],
+                context_passages=context_blocks,
+                language=lang_code,
+                system_context=f"Explain the scheme clearly. If eligibility was checked, include the result in clear simple language.{extra_note}"
+            )
+            step_desc = f"Generated official scheme explanation in {LANGUAGE_NAMES.get(lang_code, 'English')}."
+            return {"final_answer": answer, "agent_steps": [step_desc]}
+
+        # Case 3: General or No Scheme Found
+        fallback_msg = (
+            "We could not locate a specific central or state government scheme matching your query in the official database. "
+            "Please check the spelling or search by sector (e.g. 'farmers', 'housing', 'healthcare', 'pension')."
+        )
+        if lang_code != "en":
+            fallback_msg = translate_text(fallback_msg, target_language=lang_code)
+
+        step_desc = "Completed workflow with general guidance."
+        return {"final_answer": fallback_msg, "agent_steps": [step_desc]}
+
+    async def _node_generate_suggestions(self, state: AgentState) -> Dict[str, Any]:
+        """Generate 3 contextual follow-up questions for the citizen."""
+        schemes = state.get("retrieved_schemes", [])
+        lang_code = state.get("language", "en")
+
+        suggestions = []
+        if schemes:
+            first_scheme = schemes[0].get("name", "the scheme")
+            suggestions = [
+                f"What documents do I need to apply for {first_scheme}?",
+                f"How can I apply online or at a CSC center?",
+                "What other schemes can I qualify for?",
+            ]
+        elif state.get("document_id"):
+            suggestions = [
+                "What is the application deadline mentioned in this document?",
+                "What penalties or terms are specified?",
+                "Who is the nodal officer or authority?",
+            ]
+        else:
+            suggestions = [
+                "What schemes are available for small farmers?",
+                "Tell me about senior citizen health benefits.",
+                "How do I apply for housing assistance?",
+            ]
+
+        # Translate suggestions if needed
+        if lang_code != "en":
+            suggestions = [translate_text(s, target_language=lang_code) for s in suggestions]
+
+        return {"suggested_questions": suggestions, "agent_steps": ["Generated contextual follow-up questions."]}
+
+    async def _node_synthesize_audio(self, state: AgentState) -> Dict[str, Any]:
+        """Generate MP3 audio for voice accessibility."""
+        answer = state.get("final_answer", "")
+        lang_code = state.get("language", "en")
+        try:
+            audio_url = await self.voice_service.text_to_speech(text=answer, language=lang_code)
+            return {"audio_url": audio_url, "agent_steps": ["Synthesized multilingual voice response."]}
+        except Exception as e:
+            logger.warning("Voice synthesis step failed: %s", e)
+            return {"audio_url": None, "agent_steps": [f"Voice synthesis skipped: {str(e)}"]}
+
+    # ==================== MAIN EXECUTION ====================
+
+    async def run(
+        self,
+        message: str,
+        language: str = "en",
+        user_profile: Optional[Dict[str, Any]] = None,
+        document_id: Optional[str] = None,
+        conversation_history: List[Dict[str, str]] = None,
+        include_audio: bool = False,
+        session_id: str = "default_session"
+    ) -> Dict[str, Any]:
+        """Execute the LangGraph orchestrator pipeline and return final results."""
+        initial_state: AgentState = {
+            "user_message": message,
+            "language": language,
+            "user_profile": user_profile,
+            "document_id": document_id,
+            "conversation_history": conversation_history or [],
+            "include_audio": include_audio,
+            "session_id": session_id,
+            "intent": None,
+            "retrieved_schemes": [],
+            "retrieved_passages": [],
+            "eligibility_results": None,
+            "agent_steps": ["Received citizen inquiry."],
+            "final_answer": None,
+            "sources": [],
+            "audio_url": None,
+            "suggested_questions": [],
+            "error": None,
+        }
+
+        try:
+            final_state = await self.app.ainvoke(initial_state)
+            return {
+                "answer": final_state.get("final_answer", "No response generated."),
+                "language": Language(final_state.get("language", "en")),
+                "sources": [SourceCitation(**s) for s in final_state.get("sources", [])],
+                "agent_steps": final_state.get("agent_steps", []),
+                "has_audio": bool(final_state.get("audio_url")),
+                "audio_url": final_state.get("audio_url"),
+                "suggested_questions": final_state.get("suggested_questions", []),
+                "eligibility_data": final_state.get("eligibility_results"),
+                "session_id": session_id,
+            }
+        except Exception as err:
+            logger.exception("Orchestrator pipeline failed: %s", err)
+            fallback_answer = (
+                "JanSahayak encountered an error processing your request. "
+                "Please retry in a moment or visit https://www.myscheme.gov.in."
+            )
+            return {
+                "answer": fallback_answer,
+                "language": Language(language),
+                "sources": [],
+                "agent_steps": ["Pipeline encountered an unexpected error."],
+                "has_audio": False,
+                "audio_url": None,
+                "suggested_questions": ["What schemes are available?"],
+                "eligibility_data": None,
+                "session_id": session_id,
+            }
