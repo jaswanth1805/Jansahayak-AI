@@ -22,6 +22,14 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o-mini"
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     
+    # Ready-made LLM Providers (Gemini, Groq, OpenRouter)
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_MODEL: str = "google/gemini-2.0-flash-exp:free"
+    
     # Server Host and Port
     BACKEND_HOST: str = "0.0.0.0"
     BACKEND_PORT: int = 8000

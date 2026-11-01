@@ -11,6 +11,7 @@ import asyncio
 from datetime import datetime, timezone
 import logging
 import re
+import string
 from typing import List, Dict, Any, Optional
 import httpx
 from bs4 import BeautifulSoup
@@ -212,6 +213,251 @@ CURATED_FLAGSHIP_SCHEMES: List[Dict[str, Any]] = [
         "official_url": "https://www.npscra.nsdl.co.in/scheme-details.php",
         "source": "myscheme",
         "category": "Social Security & Pension",
+    },
+    {
+        "id": "pm-mudra-yojana",
+        "name": "Pradhan Mantri MUDRA Yojana (PMMY)",
+        "name_hindi": "प्रधानमंत्री मुद्रा योजना (पीएमएमवाई)",
+        "name_telugu": "ప్రధాన మంత్రి ముద్ర యోజన",
+        "description": "Collateral-free institutional micro-credit loans up to ₹10-20 lakh for non-corporate, non-farm small and micro enterprises across Shishu, Kishore, and Tarun categories.",
+        "ministry": "Ministry of Finance",
+        "state": None,
+        "beneficiary_types": ["Small Business Owners", "Shopkeepers", "Entrepreneurs", "Artisans", "Women Entrepreneurs"],
+        "benefits": [
+            "Shishu loans up to ₹50,000 for early stage ventures.",
+            "Kishore loans above ₹50,000 and up to ₹5,00,000 for established setups.",
+            "Tarun loans above ₹5,00,000 and up to ₹10,00,000 (extended up to ₹20,00,000 in recent union budget).",
+            "Zero processing fee for Shishu and Kishore tranches with collateral-free guarantee."
+        ],
+        "eligibility_criteria": [
+            "Any Indian citizen having a business plan for non-farm income-generating activity.",
+            "Manufacturing, trading, processing, and service sector micro-enterprises.",
+            "Applicant must not be a defaulter to any bank or financial institution."
+        ],
+        "required_documents": [
+            "Identity Proof (Aadhaar / Voter ID / PAN Card)",
+            "Proof of Residence (Electricity bill / Aadhaar / Ration card)",
+            "Business enterprise registration or trade license (if existing)",
+            "Bank account statements for the last 6 months"
+        ],
+        "application_url": "https://www.udyamimitra.in",
+        "official_url": "https://www.mudra.org.in",
+        "source": "myscheme",
+        "category": "Banking & Financial Services",
+    },
+    {
+        "id": "pm-svanidhi",
+        "name": "PM Street Vendor's AtmaNirbhar Nidhi (PM SVANidhi)",
+        "name_hindi": "पीएम स्ट्रीट वेंडर्स आत्मनिर्भर निधि (पीएम स्वनिधि)",
+        "name_telugu": "పీఎం స్వనిధి పథకం (వీధి వ్యాపారుల రుణం)",
+        "description": "Special micro-credit facility providing affordable collateral-free working capital loans of ₹10,000 to ₹50,000 to urban street vendors, hawkers, and thelewale.",
+        "ministry": "Ministry of Housing and Urban Affairs",
+        "state": None,
+        "beneficiary_types": ["Street Vendors", "Hawkers", "Thelewale", "Urban Micro-retailers"],
+        "benefits": [
+            "Initial working capital loan of ₹10,000 without any collateral.",
+            "Second tranche up to ₹20,000 and third tranche up to ₹50,000 upon timely repayment.",
+            "7% interest subsidy per annum credited directly to bank account via DBT.",
+            "Cashback incentives up to ₹1,200 per year on digital transactions."
+        ],
+        "eligibility_criteria": [
+            "Street vendors vending in urban areas on or before March 24, 2020 (updated periodic verification).",
+            "Possession of Certificate of Vending or Identity Card issued by Urban Local Body (ULB).",
+            "Vendors left out of survey can get Letter of Recommendation (LoR) from Town Vending Committee."
+        ],
+        "required_documents": [
+            "Aadhaar Card",
+            "Vending Certificate or Letter of Recommendation (LoR) from Municipality / ULB",
+            "Bank passbook or account details linked with Aadhaar",
+            "Active mobile number"
+        ],
+        "application_url": "https://pmsvanidhi.mohua.gov.in",
+        "official_url": "https://pmsvanidhi.mohua.gov.in",
+        "source": "myscheme",
+        "category": "Skill Development & Employment",
+    },
+    {
+        "id": "pm-surya-ghar",
+        "name": "PM Surya Ghar: Muft Bijli Yojana",
+        "name_hindi": "पीएम सूर्य घर: मुफ्त बिजली योजना",
+        "name_telugu": "పీఎం సూర్య ఘర్: ఉచిత విద్యుత్ పథకం (సౌర విద్యుత్)",
+        "description": "Rooftop solar initiative providing direct central subsidy up to ₹78,000 to households for installing rooftop solar systems, offering up to 300 units of free electricity every month.",
+        "ministry": "Ministry of New and Renewable Energy",
+        "state": None,
+        "beneficiary_types": ["Homeowners", "Residential Households", "Middle Class Families"],
+        "benefits": [
+            "Direct bank subsidy: ₹30,000 for 1 kW, ₹60,000 for 2 kW, and ₹78,000 for 3 kW and higher systems.",
+            "Up to 300 units of free electricity per month for the household.",
+            "Ability to sell surplus electricity back to the DISCOM grid via net metering.",
+            "Low-interest concessional collateral-free bank loans (approx. 7% interest) for balance amount."
+        ],
+        "eligibility_criteria": [
+            "Household must be an Indian citizen with a residential electricity connection in their name.",
+            "Must possess suitable rooftop space capable of installing solar panels.",
+            "Must not have availed any other central subsidy for solar panels previously."
+        ],
+        "required_documents": [
+            "Recent Electricity Bill (Consumer number / CA number)",
+            "Aadhaar Card of the electricity connection owner",
+            "Bank Account Passbook (cancelled cheque) for DBT subsidy transfer",
+            "Proof of roof ownership or house document"
+        ],
+        "application_url": "https://pmsuryaghar.gov.in",
+        "official_url": "https://pmsuryaghar.gov.in",
+        "source": "myscheme",
+        "category": "Energy & Environment",
+    },
+    {
+        "id": "pm-jan-dhan",
+        "name": "Pradhan Mantri Jan Dhan Yojana (PMJDY)",
+        "name_hindi": "प्रधानमंत्री जन धन योजना (पीएमजेडीवाई)",
+        "name_telugu": "ప్రధాన మంత్రి జన్ ధన్ యోజన",
+        "description": "National Mission for Financial Inclusion ensuring universal access to banking services with zero-balance savings accounts, RuPay debit cards, and inbuilt insurance.",
+        "ministry": "Ministry of Finance",
+        "state": None,
+        "beneficiary_types": ["Unbanked Citizens", "Rural Poor", "Women", "Low Income Households"],
+        "benefits": [
+            "Zero balance savings bank account (No minimum balance requirement).",
+            "Free RuPay Debit Card with inbuilt ₹2,00,000 accidental insurance coverage.",
+            "Overdraft (OD) facility up to ₹10,000 to eligible adult account holders.",
+            "Direct recipient gateway for all central and state government DBT subsidies."
+        ],
+        "eligibility_criteria": [
+            "Any Indian citizen aged 10 years or older without an existing bank account.",
+            "Account can be opened at any commercial bank branch or Bank Mitra / Business Correspondent."
+        ],
+        "required_documents": [
+            "Aadhaar Card or Voter ID / Passport / Driving License / NREGA Card",
+            "Passport size photograph",
+            "Active mobile number"
+        ],
+        "application_url": "https://www.pmjdy.gov.in",
+        "official_url": "https://www.pmjdy.gov.in",
+        "source": "myscheme",
+        "category": "Banking & Financial Services",
+    },
+    {
+        "id": "pm-ujjwala",
+        "name": "Pradhan Mantri Ujjwala Yojana (PMUY - Ujjwala 2.0)",
+        "name_hindi": "प्रधानमंत्री उज्ज्वला योजना (उज्ज्वला २.०)",
+        "name_telugu": "ప్రధాన మంత్రి ఉజ్వల యోజన (ఉచిత గ్యాస్ కనెక్షన్)",
+        "description": "Provides deposit-free LPG gas connections and targeted subsidies of ₹300 per 14.2 kg refill to adult women from poor and marginalized households across India.",
+        "ministry": "Ministry of Petroleum and Natural Gas",
+        "state": None,
+        "beneficiary_types": ["Poor Women", "BPL Families", "SC/ST Households", "Rural Homemakers"],
+        "benefits": [
+            "Deposit-free LPG connection including regulator, safety hose, and domestic gas cylinder.",
+            "First LPG refill and cooking stove (hotplate) provided completely free of cost.",
+            "Direct target subsidy of ₹300 per refill (up to 12 refills per year) transferred via DBT."
+        ],
+        "eligibility_criteria": [
+            "Applicant must be an adult woman aged 18 years or above.",
+            "Belongs to BPL, SC/ST, PMAY (Gramin), Antyodaya Anna Yojana, or most backward classes.",
+            "No member of the applicant's household should hold an existing active LPG connection."
+        ],
+        "required_documents": [
+            "Aadhaar Card of the female applicant and adult family members",
+            "Ration Card establishing family composition",
+            "Active bank account with IFSC code",
+            "Self-declaration of residential address"
+        ],
+        "application_url": "https://www.pmuy.gov.in/ujjwala2.html",
+        "official_url": "https://www.pmuy.gov.in",
+        "source": "myscheme",
+        "category": "Energy & Environment",
+    },
+    {
+        "id": "mgnrega",
+        "name": "Mahatma Gandhi National Rural Employment Guarantee Act (MGNREGA)",
+        "name_hindi": "महात्मा गांधी राष्ट्रीय ग्रामीण रोजगार गारंटी अधिनियम (मनरेगा)",
+        "name_telugu": "మహాత్మా గాంధీ జాతీయ గ్రామీణ ఉపాధి హామీ పథకం (నరేగా)",
+        "description": "Legal guarantee providing at least 100 days of wage employment per financial year to every rural household whose adult members volunteer to do unskilled manual work.",
+        "ministry": "Ministry of Rural Development",
+        "state": None,
+        "beneficiary_types": ["Rural Workers", "Daily Wage Laborers", "Agricultural Laborers", "Rural Households"],
+        "benefits": [
+            "Guaranteed 100 days of paid wage employment per household per year.",
+            "Statutory minimum daily wage paid directly into the worker's bank or post office account via DBT.",
+            "Unemployment allowance legally payable if work is not provided within 15 days of application.",
+            "Works focused on water conservation, irrigation, village roads, and rural infrastructure."
+        ],
+        "eligibility_criteria": [
+            "Must be an adult citizen (18+ years) residing in a rural gram panchayat area.",
+            "Willing to undertake unskilled manual labor.",
+            "Must be a registered member holding a valid MGNREGA Job Card."
+        ],
+        "required_documents": [
+            "Aadhaar Card",
+            "Gram Panchayat residence proof or Ration Card",
+            "Bank or Post Office savings account passbook",
+            "Passport size photograph"
+        ],
+        "application_url": "https://nrega.nic.in",
+        "official_url": "https://nrega.nic.in",
+        "source": "myscheme",
+        "category": "Skill Development & Employment",
+    },
+    {
+        "id": "national-scholarship",
+        "name": "National Scholarship Portal Schemes (NSP Central Sector)",
+        "name_hindi": "राष्ट्रीय छात्रवृत्ति पोर्टल (एनएसपी छात्रवृत्ति योजनाएं)",
+        "name_telugu": "నేషనల్ స్కాలర్‌షిప్ పోర్టల్ (ఎన్‌ఎస్‌పీ ఉపకార వేతనాలు)",
+        "description": "Central and state scholarships for pre-matric, post-matric, higher education, and technical studies for students belonging to SC, ST, OBC, EWS, and minority communities.",
+        "ministry": "Ministry of Education",
+        "state": None,
+        "beneficiary_types": ["Students", "College Youth", "SC/ST/OBC Students", "Minorities", "Merit Scholars"],
+        "benefits": [
+            "Direct monetary scholarship covering tuition fees, maintenance allowance, and book grants.",
+            "Amounts range from ₹10,000 to ₹50,000+ per academic year depending on course level.",
+            "DBT disbursement directly to the student's Aadhaar-seeded bank account."
+        ],
+        "eligibility_criteria": [
+            "Enrolled in a recognized school, college, university, or polytechnic/ITI in India.",
+            "Minimum 50% or specified cutoff marks in the previous qualifying examination.",
+            "Annual family income within prescribed limits (typically below ₹2.5 lakh to ₹8 lakh)."
+        ],
+        "required_documents": [
+            "Aadhaar Card of the student",
+            "Previous Year Academic Marksheet / Certificate",
+            "Current Year College/School Admission Receipt or Bonafide Certificate",
+            "Income Certificate issued by Tehsildar / Competent Authority",
+            "Community / Caste Certificate (if applying under SC/ST/OBC category)",
+            "Bank passbook in student's name"
+        ],
+        "application_url": "https://scholarships.gov.in",
+        "official_url": "https://scholarships.gov.in",
+        "source": "myscheme",
+        "category": "Education & Learning",
+    },
+    {
+        "id": "pm-fasal-bima",
+        "name": "Pradhan Mantri Fasal Bima Yojana (PMFBY)",
+        "name_hindi": "प्रधानमंत्री फसल बीमा योजना (पीएमएफबीवाई)",
+        "name_telugu": "ప్రధాన మంత్రి ఫసల్ బీమా యోజన (పంటల బీమా)",
+        "description": "Comprehensive agricultural crop insurance offering financial shield to farmers against non-preventable natural risks like drought, flood, pests, and post-harvest losses.",
+        "ministry": "Ministry of Agriculture & Farmers Welfare",
+        "state": None,
+        "beneficiary_types": ["Farmers", "Tenant Farmers", "Sharecroppers", "Agricultural Growers"],
+        "benefits": [
+            "Extremely low farmer premium share: 2% for Kharif crops, 1.5% for Rabi crops, and 5% for commercial/horticultural crops.",
+            "Balance premium heavily subsidized by Central and State Governments.",
+            "Complete coverage for localized perils (hailstorm, landslide, inundation) and post-harvest losses.",
+            "Direct claim settlement into the farmer's bank account via National Crop Insurance Portal."
+        ],
+        "eligibility_criteria": [
+            "All farmers growing notified crops in notified areas, including sharecroppers and tenant farmers.",
+            "Loanee farmers with Kisan Credit Card (KCC) as well as non-loanee farmers are eligible."
+        ],
+        "required_documents": [
+            "Aadhaar Card",
+            "Land ownership record (RoR / Khasra-Khatauni) or Tenant agreement",
+            "Sowing Certificate or crop declaration issued by Patwari / Village Agriculture Officer",
+            "Bank account passbook with IFSC code"
+        ],
+        "application_url": "https://pmfby.gov.in",
+        "official_url": "https://pmfby.gov.in",
+        "source": "myscheme",
+        "category": "Agriculture",
     }
 ]
 
@@ -410,6 +656,90 @@ class GovernmentSourceAggregator:
         self.data_gov = DataGovSource()
         self.curated_schemes = [GovernmentScheme(**scheme) for scheme in CURATED_FLAGSHIP_SCHEMES]
 
+    def compute_scheme_relevance(self, query: str, scheme: GovernmentScheme) -> float:
+        """Calculate high-precision relevance score between a query and a scheme."""
+        q = query.lower().strip()
+        if not q:
+            return 1.0
+
+        punct_map = str.maketrans({c: ' ' for c in string.punctuation})
+        clean_q = q.translate(punct_map)
+        q_words = [w for w in clean_q.split() if len(w) > 1]
+        if not q_words:
+            return 1.0
+
+        # Generic words that appear across many schemes or questions (English, Telugu, Hindi)
+        generic_words = {
+            # English
+            'pm', 'pradhan', 'mantri', 'yojana', 'scheme', 'bharat', 'national',
+            'yojna', 'sarkar', 'india', 'portal', 'central', 'the', 'for', 'and',
+            'about', 'how', 'can', 'get', 'apply', 'tell', 'me', 'what', 'is', 'are', 'in', 'to', 'of',
+            # Telugu
+            'పీఎం', 'పథకం', 'పథకాలు', 'గురించి', 'చెప్పండి', 'ఏమిటి', 'ఎలా', 'వివరాలు', 'ప్రభుత్వ', 'యోజన',
+            # Hindi
+            'पीएम', 'योजना', 'योजनाएं', 'के', 'बारे', 'में', 'बताएं', 'क्या', 'है', 'कैसे', 'सरकारी'
+        }
+
+        score = 0.0
+        scheme_id_clean = scheme.id.lower().translate(punct_map)
+        scheme_name_clean = scheme.name.lower().translate(punct_map)
+        scheme_hi_clean = (scheme.name_hindi or '').lower().translate(punct_map)
+        scheme_te_clean = (scheme.name_telugu or '').lower().translate(punct_map)
+
+        # 1. Exact match on scheme ID or clean query in scheme ID / acronym
+        if clean_q == scheme_id_clean or clean_q in scheme_id_clean:
+            score += 700.0
+        if clean_q in scheme_name_clean:
+            score += 500.0
+        if scheme_hi_clean and clean_q in scheme_hi_clean:
+            score += 500.0
+        if scheme_te_clean and clean_q in scheme_te_clean:
+            score += 500.0
+
+        # 2. Token-level matching with high weight on domain-specific keywords
+        matched_specific_words = 0
+        for w in q_words:
+            is_generic = w in generic_words
+            weight = 5.0 if is_generic else 60.0
+
+            if w in scheme_id_clean:
+                score += weight * 6.0
+                if not is_generic:
+                    matched_specific_words += 1
+            if w in scheme_name_clean:
+                score += weight * 5.0
+                if not is_generic:
+                    matched_specific_words += 1
+
+            if scheme_hi_clean and w in scheme_hi_clean:
+                score += weight * 6.0
+                if not is_generic:
+                    matched_specific_words += 1
+            if scheme_te_clean and w in scheme_te_clean:
+                score += weight * 6.0
+                if not is_generic:
+                    matched_specific_words += 1
+
+            desc_clean = scheme.description.lower().translate(punct_map)
+            if w in desc_clean:
+                score += weight * 1.5
+
+            cat_clean = (scheme.category or '').lower().translate(punct_map)
+            if w in cat_clean:
+                score += weight * 3.0
+
+            bens_clean = ' '.join(scheme.beneficiary_types).lower().translate(punct_map)
+            if w in bens_clean:
+                score += weight * 3.0
+
+        # Strong bonus if ALL specific words in query matched this scheme
+        specific_query_words = [w for w in q_words if w not in generic_words]
+        combined_text = f"{scheme_id_clean} {scheme_name_clean} {scheme_hi_clean} {scheme_te_clean}"
+        if specific_query_words and all(w in combined_text for w in specific_query_words):
+            score += 500.0
+
+        return score
+
     async def search_all(
         self,
         query: str = "",
@@ -422,32 +752,21 @@ class GovernmentSourceAggregator:
         sources_failed = []
         combined_schemes: List[GovernmentScheme] = []
 
-        # 1. First search curated schemes in-memory (guaranteed, fast, highly accurate)
+        # 1. First score curated schemes in-memory (guaranteed, fast, highly accurate)
         q_lower = query.lower().strip() if query else ""
-        # Tokenize query into words (ignoring short stopwords)
-        stopwords = {"what", "are", "the", "for", "and", "is", "in", "to", "of", "about", "tell", "me", "how", "can", "i", "get", "apply", "do", "you", "know", "any", "which"}
-        query_words = set(re.findall(r'\b\w+\b', q_lower)) - stopwords
 
+        curated_scored = []
         for cs in self.curated_schemes:
-            # Check match against title, description, or beneficiaries
-            cs_text = f"{cs.name} {cs.description} {' '.join(cs.beneficiary_types)} {cs.category or ''}".lower()
-            if cs.name_hindi:
-                cs_text += f" {cs.name_hindi.lower()}"
-            if cs.name_telugu:
-                cs_text += f" {cs.name_telugu.lower()}"
-
-            # Substring match OR significant token overlap
-            has_word_match = any(w in cs_text for w in query_words) if query_words else False
-            match_query = (
-                not q_lower or
-                q_lower in cs_text or
-                has_word_match
-            )
             match_state = (not state or not cs.state or state.lower() in cs.state.lower())
             match_cat = (not category or (cs.category and category.lower() in cs.category.lower()))
-            
-            if match_query and match_state and match_cat:
-                combined_schemes.append(cs)
+            if match_state and match_cat:
+                s_score = self.compute_scheme_relevance(query, cs)
+                if not q_lower or s_score > 0:
+                    curated_scored.append((cs, s_score))
+
+        # Sort curated schemes by relevance score descending
+        curated_scored.sort(key=lambda item: item[1], reverse=True)
+        combined_schemes = [cs for cs, _ in curated_scored]
 
         # 2. Run remote queries concurrently
         async def fetch_myscheme():
@@ -479,13 +798,16 @@ class GovernmentSourceAggregator:
             seen_ids = {s.id for s in combined_schemes}
             for scheme in myscheme_results:
                 if scheme.id not in seen_ids:
-                    combined_schemes.append(scheme)
-                    seen_ids.add(scheme.id)
+                    s_score = self.compute_scheme_relevance(query, scheme)
+                    if not q_lower or s_score > 0:
+                        combined_schemes.append(scheme)
+                        seen_ids.add(scheme.id)
 
-        # Sort by relevance: schemes whose name begins with or contains query first
+        # Final sort by relevance score descending
         if q_lower:
             combined_schemes.sort(
-                key=lambda s: (q_lower not in s.name.lower(), s.name.lower())
+                key=lambda s: self.compute_scheme_relevance(query, s),
+                reverse=True
             )
 
         return {

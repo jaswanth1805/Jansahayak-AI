@@ -112,7 +112,7 @@ export const api = {
         language,
         conversation_history: history,
         session_id: sessionId,
-        include_audio: true,
+        include_audio: false,
       }),
     });
     if (!res.ok) {

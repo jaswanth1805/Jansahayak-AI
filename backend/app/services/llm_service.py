@@ -7,6 +7,7 @@ complete with tenacity retry mechanisms, grounded RAG prompts, and multi-languag
 import logging
 from typing import List, Dict, Any, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import httpx
 import openai
 from openai import AsyncOpenAI
 
@@ -17,31 +18,123 @@ logger = logging.getLogger(__name__)
 
 
 class LLMService:
-    """Service wrapping OpenAI chat completions and RAG prompt synthesis."""
+    """Service wrapping Google Gemini, Groq, OpenAI, and OpenRouter with fallback synthesis."""
 
     def __init__(self):
         settings = get_settings()
-        self.api_key = settings.OPENAI_API_KEY
-        self.model = settings.OPENAI_MODEL
-        self.client: Optional[AsyncOpenAI] = None
+        self.openai_key = settings.OPENAI_API_KEY
+        self.openai_model = settings.OPENAI_MODEL
         
-        # Initialize client if key is configured
-        if self.is_configured():
-            self.client = AsyncOpenAI(api_key=self.api_key)
-            logger.info("LLMService initialized with OpenAI model: %s", self.model)
+        self.gemini_key = settings.GEMINI_API_KEY
+        self.gemini_model = settings.GEMINI_MODEL
+        
+        self.groq_key = settings.GROQ_API_KEY
+        self.groq_model = settings.GROQ_MODEL
+        
+        self.openrouter_key = settings.OPENROUTER_API_KEY
+        self.openrouter_model = settings.OPENROUTER_MODEL
+        
+        self.openai_client: Optional[AsyncOpenAI] = None
+        self.groq_client: Optional[AsyncOpenAI] = None
+        self.openrouter_client: Optional[AsyncOpenAI] = None
+        
+        active_provider = self.get_active_provider()
+        if active_provider:
+            logger.info("LLMService active provider: %s", active_provider)
         else:
-            logger.warning("LLMService initialized without valid OPENAI_API_KEY.")
+            logger.info("LLMService running in high-accuracy offline conversational synthesis mode.")
+
+    def get_active_provider(self) -> Optional[str]:
+        """Detect which ready-made LLM provider is configured."""
+        if self._is_valid_key(self.gemini_key):
+            return f"Google Gemini ({self.gemini_model})"
+        if self._is_valid_key(self.groq_key):
+            return f"Groq Cloud ({self.groq_model})"
+        if self._is_valid_key(self.openai_key):
+            return f"OpenAI ({self.openai_model})"
+        if self._is_valid_key(self.openrouter_key):
+            return f"OpenRouter ({self.openrouter_model})"
+        return None
+
+    def _is_valid_key(self, key: Optional[str]) -> bool:
+        return bool(key and key.strip() and not key.startswith("your_"))
 
     def is_configured(self) -> bool:
-        """Check whether a non-dummy OpenAI API key has been supplied."""
-        return bool(self.api_key and self.api_key.strip() and not self.api_key.startswith("your_"))
+        """Check whether any ready-made LLM API key has been supplied."""
+        return self.get_active_provider() is not None
 
-    @retry(
-        reraise=True,
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=6),
-        retry=retry_if_exception_type((openai.APIConnectionError, openai.RateLimitError, openai.APITimeoutError))
-    )
+    async def _call_gemini(self, messages: List[Dict[str, str]], temperature: float = 0.3) -> str:
+        """Call Google Gemini REST API using httpx."""
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.gemini_model}:generateContent?key={self.gemini_key}"
+        contents = []
+        system_instruction = None
+        for m in messages:
+            role = m["role"]
+            content = m["content"]
+            if role == "system":
+                system_instruction = {"parts": [{"text": content}]}
+            elif role == "user":
+                contents.append({"role": "user", "parts": [{"text": content}]})
+            elif role == "assistant":
+                contents.append({"role": "model", "parts": [{"text": content}]})
+                
+        body: Dict[str, Any] = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": 2048,
+            }
+        }
+        if system_instruction:
+            body["systemInstruction"] = system_instruction
+            
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            resp = await client.post(url, json=body)
+            if resp.status_code == 200:
+                data = resp.json()
+                candidates = data.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        return parts[0].get("text", "").strip()
+            raise RuntimeError(f"Gemini API returned status {resp.status_code}: {resp.text[:200]}")
+
+    async def _call_groq(self, messages: List[Dict[str, str]], temperature: float = 0.3, max_tokens: int = 2000) -> str:
+        """Call Groq Cloud API via OpenAI compatible interface."""
+        if not self.groq_client:
+            self.groq_client = AsyncOpenAI(api_key=self.groq_key, base_url="https://api.groq.com/openai/v1")
+        resp = await self.groq_client.chat.completions.create(
+            model=self.groq_model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        return resp.choices[0].message.content.strip()
+
+    async def _call_openai(self, messages: List[Dict[str, str]], temperature: float = 0.3, max_tokens: int = 2000) -> str:
+        """Call OpenAI API."""
+        if not self.openai_client:
+            self.openai_client = AsyncOpenAI(api_key=self.openai_key)
+        resp = await self.openai_client.chat.completions.create(
+            model=self.openai_model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        return resp.choices[0].message.content.strip()
+
+    async def _call_openrouter(self, messages: List[Dict[str, str]], temperature: float = 0.3, max_tokens: int = 2000) -> str:
+        """Call OpenRouter API."""
+        if not self.openrouter_client:
+            self.openrouter_client = AsyncOpenAI(api_key=self.openrouter_key, base_url="https://openrouter.ai/api/v1")
+        resp = await self.openrouter_client.chat.completions.create(
+            model=self.openrouter_model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        return resp.choices[0].message.content.strip()
+
     async def chat_completion(
         self,
         messages: List[Dict[str, str]],
@@ -49,41 +142,32 @@ class LLMService:
         max_tokens: int = 2000,
         response_format: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Execute chat completion request with exponential backoff on transient errors.
-        
-        Args:
-            messages: List of message objects with 'role' and 'content'.
-            temperature: Sampling temperature (0.0 to 1.0).
-            max_tokens: Maximum tokens in completion.
-            response_format: Optional schema enforcement e.g. {"type": "json_object"}.
-            
-        Returns:
-            String response generated by the LLM.
-        """
-        if not self.is_configured():
-            raise RuntimeError(
-                "OpenAI API key is not configured. Please set OPENAI_API_KEY in your .env file."
-            )
-            
-        if self.client is None:
-            self.client = AsyncOpenAI(api_key=self.api_key)
+        """Execute chat completion request with available configured provider."""
+        if self._is_valid_key(self.gemini_key):
+            try:
+                return await self._call_gemini(messages, temperature=temperature)
+            except Exception as e:
+                logger.warning("Gemini completion attempt failed: %s", e)
 
-        kwargs: Dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-        if response_format:
-            kwargs["response_format"] = response_format
+        if self._is_valid_key(self.groq_key):
+            try:
+                return await self._call_groq(messages, temperature=temperature, max_tokens=max_tokens)
+            except Exception as e:
+                logger.warning("Groq completion attempt failed: %s", e)
 
-        try:
-            response = await self.client.chat.completions.create(**kwargs)
-            content = response.choices[0].message.content
-            return content.strip() if content else ""
-        except Exception as e:
-            logger.error("Chat completion error: %s", e)
-            raise
+        if self._is_valid_key(self.openai_key):
+            try:
+                return await self._call_openai(messages, temperature=temperature, max_tokens=max_tokens)
+            except Exception as e:
+                logger.warning("OpenAI completion attempt failed: %s", e)
+
+        if self._is_valid_key(self.openrouter_key):
+            try:
+                return await self._call_openrouter(messages, temperature=temperature, max_tokens=max_tokens)
+            except Exception as e:
+                logger.warning("OpenRouter completion attempt failed: %s", e)
+
+        raise RuntimeError("No LLM provider succeeded or was configured.")
 
     async def generate_rag_response(
         self,

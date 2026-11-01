@@ -294,9 +294,17 @@ class JanSahayakOrchestrator:
                 crit_str = "; ".join(s.get("eligibility_criteria", []))
                 ben_str = "; ".join(s.get("benefits", []))
                 docs_str = "; ".join(s.get("required_documents", []))
+                
+                # Pick localized name if requested
+                disp_name = s.get("name", "Government Scheme")
+                if lang_code == "te" and s.get("name_telugu"):
+                    disp_name = s.get("name_telugu")
+                elif lang_code == "hi" and s.get("name_hindi"):
+                    disp_name = s.get("name_hindi")
+
                 context_blocks.append({
                     "text": (
-                        f"Scheme: {s.get('name')}\n"
+                        f"Scheme: {disp_name}\n"
                         f"Ministry: {s.get('ministry', 'Government of India')}\n"
                         f"Description: {s.get('description')}\n"
                         f"Benefits: {ben_str}\n"
@@ -304,7 +312,7 @@ class JanSahayakOrchestrator:
                         f"Documents Required: {docs_str}\n"
                         f"Official Link: {s.get('official_url')}"
                     ),
-                    "metadata": {"source": s.get("name")}
+                    "metadata": {"source": disp_name, "title": disp_name}
                 })
 
             extra_note = ""
@@ -335,34 +343,70 @@ class JanSahayakOrchestrator:
         return {"final_answer": answer, "agent_steps": [step_desc]}
 
     async def _node_generate_suggestions(self, state: AgentState) -> Dict[str, Any]:
-        """Generate 3 contextual follow-up questions for the citizen."""
+        """Generate 3 contextual follow-up questions for the citizen in target language."""
         schemes = state.get("retrieved_schemes", [])
         lang_code = state.get("language", "en")
 
-        suggestions = []
-        if schemes:
-            first_scheme = schemes[0].get("name", "the scheme")
-            suggestions = [
-                f"What documents do I need to apply for {first_scheme}?",
-                f"How can I apply online or at a CSC center?",
-                "What other schemes can I qualify for?",
-            ]
-        elif state.get("document_id"):
-            suggestions = [
-                "What is the application deadline mentioned in this document?",
-                "What penalties or terms are specified?",
-                "Who is the nodal officer or authority?",
-            ]
+        if lang_code == "te":
+            if schemes:
+                first_scheme = schemes[0].get("name_telugu") or schemes[0].get("name", "ఈ పథకం")
+                suggestions = [
+                    f"{first_scheme}కు దరఖాస్తు చేసుకోవడానికి ఏ పత్రాలు కావాలి?",
+                    "ఆన్‌లైన్ లేదా మీసేవ కేంద్రంలో ఎలా దరఖాస్తు చేయాలి?",
+                    "నేను అర్హుడినో కాదో ఎలా తెలుసుకోవాలి?",
+                ]
+            elif state.get("document_id"):
+                suggestions = [
+                    "ఈ పత్రంలో పేర్కొన్న దరఖాస్తు గడువు తేదీ ఏమిటి?",
+                    "అర్హత నిబంధనలు ఏమిటి?",
+                    "సంబంధిత అధికారి లేదా హెల్ప్‌లైన్ నంబర్ ఏమిటి?",
+                ]
+            else:
+                suggestions = [
+                    "రైతులకు ఏ సంక్షేమ పథకాలు అందుబాటులో ఉన్నాయి?",
+                    "ఆరోగ్యశ్రీ / ఆయుష్మాన్ భారత్ ద్వారా ఎంత లబ్ధి చేకూరుతుంది?",
+                    "ఉచిత ఇళ్ల పథకానికి (PMAY) ఎవరు అర్హులు?",
+                ]
+        elif lang_code == "hi":
+            if schemes:
+                first_scheme = schemes[0].get("name_hindi") or schemes[0].get("name", "इस योजना")
+                suggestions = [
+                    f"{first_scheme} के लिए कौन से दस्तावेज़ आवश्यक हैं?",
+                    "ऑनलाइन या जन सेवा केंद्र (CSC) से कैसे आवेदन करें?",
+                    "क्या मैं इस योजना के लिए पात्र हूँ?",
+                ]
+            elif state.get("document_id"):
+                suggestions = [
+                    "इस दस्तावेज़ में आवेदन की अंतिम तिथि क्या है?",
+                    "मुख्य पात्रता शर्तें क्या हैं?",
+                    "नोडल अधिकारी या हेल्पलाइन नंबर क्या है?",
+                ]
+            else:
+                suggestions = [
+                    "किसानों के लिए कौन सी कल्याणकारी योजनाएं हैं?",
+                    "आयुष्मान भारत कार्ड कैसे बनवाएं?",
+                    "पीएम आवास योजना के लिए आवेदन कैसे करें?",
+                ]
         else:
-            suggestions = [
-                "What schemes are available for small farmers?",
-                "Tell me about senior citizen health benefits.",
-                "How do I apply for housing assistance?",
-            ]
-
-        # Translate suggestions if needed
-        if lang_code != "en":
-            suggestions = [translate_text(s, target_language=lang_code) for s in suggestions]
+            if schemes:
+                first_scheme = schemes[0].get("name", "this scheme")
+                suggestions = [
+                    f"What documents do I need to apply for {first_scheme}?",
+                    "How can I apply online or at a CSC center?",
+                    "What other schemes can I qualify for?",
+                ]
+            elif state.get("document_id"):
+                suggestions = [
+                    "What is the application deadline mentioned in this document?",
+                    "What penalties or terms are specified?",
+                    "Who is the nodal officer or authority?",
+                ]
+            else:
+                suggestions = [
+                    "What schemes are available for small farmers?",
+                    "Tell me about senior citizen health benefits.",
+                    "How do I apply for housing assistance?",
+                ]
 
         return {"suggested_questions": suggestions, "agent_steps": ["Generated contextual follow-up questions."]}
 
