@@ -94,6 +94,8 @@ export interface DocumentUploadResponse {
   required_documents_mentioned: string[];
   language_detected: string;
   processing_notes: string[];
+  is_scanned?: boolean;
+  document_type?: string;
 }
 
 // API functions

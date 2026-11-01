@@ -80,7 +80,9 @@ def extract_text_from_pdf(file_path: str) -> Dict[str, Any]:
         Dict containing:
             - pages: List of {"page_num": int, "text": str, "has_images": bool}
             - total_pages: Total page count
-            - extraction_method: 'direct_text', 'ocr', or 'hybrid'
+            - total_chars: Total character count extracted
+            - is_scanned: True if document contains images but lacks machine text
+            - extraction_method: 'direct_text', 'ocr', 'scanned_image', or 'empty'
     """
     if not os.path.isfile(file_path):
         raise FileNotFoundError(f"PDF file not found at {file_path}")
@@ -89,7 +91,8 @@ def extract_text_from_pdf(file_path: str) -> Dict[str, Any]:
     
     pages_data: List[Dict[str, Any]] = []
     used_ocr = False
-    used_direct = False
+    total_chars = 0
+    has_any_images = False
     
     try:
         doc = fitz.open(file_path)
@@ -105,19 +108,18 @@ def extract_text_from_pdf(file_path: str) -> Dict[str, Any]:
         extracted_text = page.get_text("text").strip()
         image_list = page.get_images(full=True)
         has_images = len(image_list) > 0
+        if has_images:
+            has_any_images = True
         
         # If text is empty or sparse (<40 chars) and page has images, try OCR fallback
         if len(extracted_text) < 40 and has_images:
-            logger.info("Page %d has minimal text but contains images. Attempting OCR fallback.", page_num)
+            logger.info("Page %d has minimal text (%d chars) but contains images. Attempting OCR fallback.", page_num, len(extracted_text))
             ocr_text = _run_page_ocr(page)
-            if ocr_text:
+            if ocr_text and len(ocr_text) > len(extracted_text):
                 extracted_text = ocr_text
                 used_ocr = True
-            else:
-                used_direct = True
-        else:
-            used_direct = True
             
+        total_chars += len(extracted_text)
         pages_data.append({
             "page_num": page_num,
             "text": extracted_text,
@@ -126,22 +128,28 @@ def extract_text_from_pdf(file_path: str) -> Dict[str, Any]:
         
     doc.close()
     
-    if used_ocr and used_direct:
-        method = "hybrid"
-    elif used_ocr:
+    is_scanned = (total_chars < 30 and has_any_images)
+    
+    if used_ocr and total_chars >= 30:
         method = "ocr"
-    else:
+    elif is_scanned:
+        method = "scanned_image"
+    elif total_chars >= 30:
         method = "direct_text"
+    else:
+        method = "empty"
         
     return {
         "pages": pages_data,
         "total_pages": total_pages,
+        "total_chars": total_chars,
+        "is_scanned": is_scanned,
         "extraction_method": method,
     }
 
 
 def _run_page_ocr(page) -> str:
-    """Render page as image and run pytesseract OCR.
+    """Render page as image and run pytesseract OCR if local tesseract binary exists.
     
     Returns extracted text string, or empty string on failure.
     """
@@ -161,7 +169,7 @@ def _run_page_ocr(page) -> str:
             
         return text.strip()
     except Exception as ocr_err:
-        logger.warning("OCR processing failed for page: %s", ocr_err)
+        logger.info("Local pytesseract OCR not active or executable missing: %s", ocr_err)
         return ""
 
 

@@ -84,45 +84,9 @@ export default function DocumentsPage() {
       setDocuments((prev) => [response, ...prev]);
       setActiveDocId(response.document_id);
     } catch (err: unknown) {
-      console.warn("Upload API unavailable, generating structured analysis fallback:", err);
-      // Helpful offline demo parsing of circulars
-      const fallbackDoc: DocumentUploadResponse = {
-        document_id: `doc_${Date.now()}`,
-        filename: file.name,
-        page_count: 8,
-        extracted_text_preview:
-          "Government of India Gazette Notification — Operational Guidelines for Central Welfare & Subsidy Distribution. This notification outlines applicant eligibility, DBT account mapping, and timelines...",
-        key_clauses: [
-          "Clause 4.1: Direct Benefit Transfer (DBT) mandatory via Aadhaar-linked NPCI bank accounts.",
-          "Clause 7.2: Submission deadline strictly fixed at 45 days post notification issuance.",
-          "Clause 11.3: Verification authority designated as District Level Sanctioning Committee (DLSC).",
-          "Clause 14.5: Beneficiaries with annual taxable family income exceeding ₹5 Lakhs are excluded.",
-        ],
-        important_dates: [
-          "Effective from: April 1, 2024",
-          "Last date of registration: October 31, 2024",
-          "Fund disbursal initiation: December 15, 2024",
-        ],
-        eligibility_mentions: [
-          "Permanent domicile certificate required from concerned State / UT",
-          "Age criterion between 18 and 60 years on the date of submission",
-          "No family member employed in Central / State Government permanent cadre",
-        ],
-        required_documents_mentioned: [
-          "Aadhaar Identity Card (Biometrically verified)",
-          "Income and Asset Certificate issued by Tehsildar",
-          "Bank Passbook copy with IFSC / MICR",
-          "Recent passport size photographs",
-        ],
-        language_detected: "English / Hindi",
-        processing_notes: [
-          "Text layers extracted successfully via OCR pipeline",
-          "Parsed 4 distinct regulatory sections and timeline schedules",
-        ],
-      };
-
-      setDocuments((prev) => [fallbackDoc, ...prev]);
-      setActiveDocId(fallbackDoc.document_id);
+      console.error("Document upload failed:", err);
+      const msg = err instanceof Error ? err.message : "Failed to upload document. Please ensure backend server is running.";
+      setUploadError(msg);
     } finally {
       setTimeout(() => {
         setIsUploading(false);
@@ -390,7 +354,12 @@ export default function DocumentsPage() {
                         {activeDoc.filename}
                       </CardTitle>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {activeDoc.document_type && (
+                        <Badge variant="outline" className="text-[10px] bg-slate-50 text-slate-700 border-slate-300">
+                          {activeDoc.document_type}
+                        </Badge>
+                      )}
                       <Badge variant="navy" className="text-[10px]">
                         {activeDoc.page_count} Pages
                       </Badge>
@@ -400,19 +369,37 @@ export default function DocumentsPage() {
                     </div>
                   </div>
                   {activeDoc.extracted_text_preview && (
-                    <CardDescription className="text-xs text-slate-600 line-clamp-2 mt-2">
+                    <div className="text-xs text-slate-700 bg-slate-50/80 border border-slate-200 rounded-lg p-3 mt-3 whitespace-pre-wrap font-sans leading-relaxed">
                       {activeDoc.extracted_text_preview}
-                    </CardDescription>
+                    </div>
                   )}
                 </CardHeader>
 
                 <CardContent className="pt-4 space-y-5">
-                  {/* Key Clauses */}
+                  {/* Scanned Document Notice Banner */}
+                  {(activeDoc.is_scanned || activeDoc.extracted_text_preview?.includes("Scanned Image")) && (
+                    <div className="rounded-xl bg-amber-50/80 border border-amber-200 p-4 flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                      <div className="text-xs space-y-1">
+                        <h4 className="font-bold text-amber-950">
+                          Scanned Photo / Image Document Detected
+                        </h4>
+                        <p className="text-amber-800 leading-relaxed">
+                          This document was uploaded as a scanned image or photo without an embedded digital text layer. Machine-readable text could not be extracted directly.
+                        </p>
+                        <p className="text-amber-700 font-medium text-[11px]">
+                          💡 <strong>Tip:</strong> Upload a text-searchable PDF (with selectable text) or add a free <code className="bg-amber-100 px-1 py-0.5 rounded text-amber-900">GEMINI_API_KEY</code> in <code className="bg-amber-100 px-1 py-0.5 rounded text-amber-900">backend/.env</code> for automatic AI Vision OCR.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Key Clauses / Summary Points */}
                   {activeDoc.key_clauses && activeDoc.key_clauses.length > 0 && (
                     <div>
                       <h4 className="text-xs font-bold text-navy-950 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        Key Identified Clauses
+                        Key Identified Clauses & Overview
                       </h4>
                       <ul className="space-y-1.5 text-xs text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-200">
                         {activeDoc.key_clauses.map((clause, idx) => (
@@ -426,43 +413,46 @@ export default function DocumentsPage() {
                   )}
 
                   {/* Important Dates & Eligibility Mentions Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Important Dates */}
-                    {activeDoc.important_dates && activeDoc.important_dates.length > 0 && (
-                      <div className="rounded-lg bg-indigo-50/50 border border-indigo-100 p-3">
-                        <h4 className="text-xs font-bold text-indigo-950 mb-2 flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-indigo-600" />
-                          Important Dates & Deadlines
-                        </h4>
-                        <ul className="space-y-1 text-xs text-indigo-900">
-                          {activeDoc.important_dates.map((date, idx) => (
-                            <li key={idx} className="flex items-start gap-1.5">
-                              <span className="font-semibold text-indigo-600">→</span>
-                              <span>{date}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
+                  {((activeDoc.important_dates && activeDoc.important_dates.length > 0) ||
+                    (activeDoc.eligibility_mentions && activeDoc.eligibility_mentions.length > 0)) && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Important Dates */}
+                      {activeDoc.important_dates && activeDoc.important_dates.length > 0 && (
+                        <div className="rounded-lg bg-indigo-50/50 border border-indigo-100 p-3">
+                          <h4 className="text-xs font-bold text-indigo-950 mb-2 flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                            Important Dates & Deadlines
+                          </h4>
+                          <ul className="space-y-1 text-xs text-indigo-900">
+                            {activeDoc.important_dates.map((date, idx) => (
+                              <li key={idx} className="flex items-start gap-1.5">
+                                <span className="font-semibold text-indigo-600">→</span>
+                                <span>{date}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
 
-                    {/* Eligibility Mentions */}
-                    {activeDoc.eligibility_mentions && activeDoc.eligibility_mentions.length > 0 && (
-                      <div className="rounded-lg bg-emerald-50/50 border border-emerald-100 p-3">
-                        <h4 className="text-xs font-bold text-emerald-950 mb-2 flex items-center gap-1.5">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                          Eligibility Mentions
-                        </h4>
-                        <ul className="space-y-1 text-xs text-emerald-900">
-                          {activeDoc.eligibility_mentions.map((elig, idx) => (
-                            <li key={idx} className="flex items-start gap-1.5">
-                              <span className="font-semibold text-emerald-600">✓</span>
-                              <span>{elig}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
+                      {/* Eligibility Mentions */}
+                      {activeDoc.eligibility_mentions && activeDoc.eligibility_mentions.length > 0 && (
+                        <div className="rounded-lg bg-emerald-50/50 border border-emerald-100 p-3">
+                          <h4 className="text-xs font-bold text-emerald-950 mb-2 flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            Eligibility Mentions
+                          </h4>
+                          <ul className="space-y-1 text-xs text-emerald-900">
+                            {activeDoc.eligibility_mentions.map((elig, idx) => (
+                              <li key={idx} className="flex items-start gap-1.5">
+                                <span className="font-semibold text-emerald-600">✓</span>
+                                <span>{elig}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Required Documents */}
                   {activeDoc.required_documents_mentioned &&
@@ -485,6 +475,19 @@ export default function DocumentsPage() {
                         </div>
                       </div>
                     )}
+
+                  {/* Processing Notes */}
+                  {activeDoc.processing_notes && activeDoc.processing_notes.length > 0 && (
+                    <div className="pt-3 border-t border-slate-100 text-[11px] text-slate-500 space-y-1">
+                      <span className="font-semibold text-slate-600 block mb-1">Extraction Pipeline Notes:</span>
+                      {activeDoc.processing_notes.map((note, idx) => (
+                        <p key={idx} className="flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400 inline-block shrink-0" />
+                          <span>{note}</span>
+                        </p>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 

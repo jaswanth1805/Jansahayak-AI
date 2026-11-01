@@ -197,6 +197,8 @@ class DocumentUploadResponse(BaseModel):
     )
     language_detected: str = Field(default="en", description="Detected language code of the document")
     processing_notes: List[str] = Field(default_factory=list, description="Notices on OCR, fallback, or indexing status")
+    is_scanned: bool = Field(default=False, description="Whether document is an image scan without digital text")
+    document_type: Optional[str] = Field(default=None, description="Inferred or extracted document classification")
 
 
 class DocumentQueryRequest(BaseModel):

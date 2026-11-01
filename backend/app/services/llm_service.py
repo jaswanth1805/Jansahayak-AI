@@ -63,6 +63,78 @@ class LLMService:
         """Check whether any ready-made LLM API key has been supplied."""
         return self.get_active_provider() is not None
 
+    async def transcribe_image_with_vision(self, image_bytes: bytes, mime_type: str = "image/png") -> str:
+        """Transcribe text from image bytes using Gemini 1.5 Flash or OpenAI multimodal vision."""
+        import base64
+        b64_data = base64.b64encode(image_bytes).decode("utf-8")
+
+        # 1. Try Gemini Vision if Gemini API key configured
+        if self._is_valid_key(self.gemini_key):
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.gemini_model}:generateContent?key={self.gemini_key}"
+                body = {
+                    "contents": [
+                        {
+                            "parts": [
+                                {
+                                    "inline_data": {
+                                        "mime_type": mime_type,
+                                        "data": b64_data,
+                                    }
+                                },
+                                {
+                                    "text": (
+                                        "You are an OCR and document transcription engine. "
+                                        "Accurately transcribe all readable text, titles, numbers, names, subjects, marks, grades, clauses, and tables from this document image into clean text. "
+                                        "Output the transcribed plain text directly without markdown fences."
+                                    )
+                                }
+                            ]
+                        }
+                    ],
+                    "generationConfig": {
+                        "temperature": 0.1,
+                        "maxOutputTokens": 2048,
+                    }
+                }
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.post(url, json=body)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts", [])
+                            if parts:
+                                return parts[0].get("text", "").strip()
+                    logger.warning("Gemini Vision failed with status %d: %s", resp.status_code, resp.text[:200])
+            except Exception as e:
+                logger.warning("Gemini Vision transcription error: %s", e)
+
+        # 2. Try OpenAI Vision if OpenAI API key configured
+        if self._is_valid_key(self.openai_key):
+            try:
+                if not self.openai_client:
+                    self.openai_client = AsyncOpenAI(api_key=self.openai_key)
+                resp = await self.openai_client.chat.completions.create(
+                    model=self.openai_model,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": "Accurately transcribe all readable text, titles, numbers, names, subjects, marks, grades, clauses, and tables from this document image into clean text."},
+                                {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64_data}"}}
+                            ]
+                        }
+                    ],
+                    max_tokens=2048,
+                    temperature=0.1
+                )
+                return resp.choices[0].message.content.strip()
+            except Exception as oe:
+                logger.warning("OpenAI Vision error: %s", oe)
+
+        return ""
+
     async def _call_gemini(self, messages: List[Dict[str, str]], temperature: float = 0.3) -> str:
         """Call Google Gemini REST API using httpx."""
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.gemini_model}:generateContent?key={self.gemini_key}"
