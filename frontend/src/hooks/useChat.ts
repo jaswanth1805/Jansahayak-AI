@@ -181,7 +181,7 @@ export function useChat(initialLanguage: Language = "en") {
         // Add a friendly assistant fallback message so conversation continues gracefully
         const fallbackMsg: ExtendedChatMessage = {
           role: "assistant",
-          content: `⚠️ We encountered an issue contacting the JanSahayak AI service: "${errMsg}". \n\nPlease make sure the backend server is running on http://localhost:8000 and try again.`,
+          content: `⚠️ We encountered an issue contacting the JanSahayak AI service: "${errMsg}". \n\nPlease ensure your backend service is running and reachable.`,
           timestamp: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, fallbackMsg].slice(-200));
