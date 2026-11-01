@@ -192,9 +192,7 @@ export function useVoice(language: Language = "en") {
               .trim();
             const utterance = new SpeechSynthesisUtterance(clean.slice(0, 800));
             utterance.lang = getSpeechLang(langCode);
-            utterance.onstart = () => setIsPlaying(true);
-            utterance.onend = () => setIsPlaying(false);
-            utterance.onerror = () => setIsPlaying(false);
+            window.speechSynthesis.resume();
             window.speechSynthesis.speak(utterance);
           } catch (e) {
             console.error("Browser speech synthesis error:", e);
@@ -212,6 +210,7 @@ export function useVoice(language: Language = "en") {
 
       try {
         const audio = new Audio(fullUrl);
+        audio.preload = "auto";
         audioRef.current = audio;
         setIsPlaying(true);
 
@@ -224,7 +223,13 @@ export function useVoice(language: Language = "en") {
           speakBrowserFallback();
         };
 
-        await audio.play();
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            console.warn("audio.play() error or blocked by browser policy, using SpeechSynthesis:", err);
+            speakBrowserFallback();
+          });
+        }
       } catch (err: unknown) {
         console.warn("Direct audio.play() blocked, attempting browser SpeechSynthesis:", err);
         speakBrowserFallback();

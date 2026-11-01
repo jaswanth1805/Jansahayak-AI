@@ -314,11 +314,15 @@ export default function SchemesPage() {
                 </SelectTrigger>
                 <SelectContent className="max-h-72">
                   <SelectItem value="all">All States / Central</SelectItem>
-                  {statesList.map((state) => (
-                    <SelectItem key={state} value={state} className="text-xs">
-                      {state}
-                    </SelectItem>
-                  ))}
+                  {statesList.map((state: any) => {
+                    const val = typeof state === "string" ? state : state?.name || "";
+                    if (!val) return null;
+                    return (
+                      <SelectItem key={val} value={val} className="text-xs">
+                        {val}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
@@ -337,11 +341,15 @@ export default function SchemesPage() {
                 </SelectTrigger>
                 <SelectContent className="max-h-72">
                   <SelectItem value="all">All Categories</SelectItem>
-                  {categoriesList.map((cat) => (
-                    <SelectItem key={cat} value={cat} className="text-xs">
-                      {cat}
-                    </SelectItem>
-                  ))}
+                  {categoriesList.map((cat: any) => {
+                    const val = typeof cat === "string" ? cat : cat?.name || "";
+                    if (!val) return null;
+                    return (
+                      <SelectItem key={val} value={val} className="text-xs">
+                        {val}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>

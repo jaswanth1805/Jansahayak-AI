@@ -147,7 +147,8 @@ export const api = {
       throw new Error(errText || `Failed to fetch states: ${res.statusText}`);
     }
     const data = await res.json();
-    return data.states;
+    const raw = data.states || [];
+    return raw.map((s: any) => (typeof s === "string" ? s : s.name || ""));
   },
 
   getCategories: async (): Promise<string[]> => {
@@ -157,7 +158,8 @@ export const api = {
       throw new Error(errText || `Failed to fetch categories: ${res.statusText}`);
     }
     const data = await res.json();
-    return data.categories;
+    const raw = data.categories || [];
+    return raw.map((c: any) => (typeof c === "string" ? c : c.name || ""));
   },
 
   checkEligibility: async (
