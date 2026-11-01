@@ -96,7 +96,7 @@ let memoryState: State = { toasts: [] };
 
 function dispatch(action: Action) {
   const affectedIds = action.type === "DISMISS_TOAST" || action.type === "REMOVE_TOAST"
-    ? (action.toastId ? [action.toastId] : [...toastTimeouts.keys()])
+    ? (action.toastId ? [action.toastId] : Array.from(toastTimeouts.keys()))
     : [];
   for (const id of affectedIds) {
     const timer = toastTimeouts.get(id);
