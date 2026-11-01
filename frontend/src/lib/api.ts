@@ -1,4 +1,9 @@
-const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000').replace(/\/+$/, '');
+export const BACKEND_URL = (
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  (process.env.NODE_ENV === 'production'
+    ? 'https://jansahayak-ai-qyjd.onrender.com'
+    : 'http://localhost:8000')
+).replace(/\/+$/, '');
 
 // Types matching the backend Pydantic models
 export type Language = 'en' | 'hi' | 'te';

@@ -1,3 +1,10 @@
+const backendUrl = (
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  (process.env.NODE_ENV === 'production'
+    ? 'https://jansahayak-ai-qyjd.onrender.com'
+    : 'http://localhost:8000')
+).replace(/\/+$/, '');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -17,7 +24,7 @@ const nextConfig = {
     return [
       {
         source: '/api/voice/:path*',
-        destination: 'http://localhost:8000/api/voice/:path*',
+        destination: `${backendUrl}/api/voice/:path*`,
       },
     ];
   },

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { api, Language } from "@/lib/api";
+import { api, Language, BACKEND_URL } from "@/lib/api";
 
 // Web Speech API interfaces
 interface SpeechRecognitionEvent extends Event {
@@ -196,7 +196,6 @@ export function useVoice(language: Language = "en") {
       if (!url && !fallbackText) return;
       const playbackId = playbackIdRef.current;
 
-      const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
       const fullUrl = url?.startsWith("/api/voice/audio/") ? `${BACKEND_URL}${url}` : "";
 
       const speakBrowserFallback = () => {
