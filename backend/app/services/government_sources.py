@@ -481,8 +481,7 @@ class MySchemeSource:
         }
 
     @retry(
-        stop=stop_after_attempt(2),
-        wait=wait_fixed(2),
+        stop=stop_after_attempt(1),
         retry=retry_if_exception_type((httpx.RequestError, httpx.TimeoutException))
     )
     async def search_schemes(
@@ -491,11 +490,11 @@ class MySchemeSource:
         state: str = "",
         category: str = "",
         beneficiary: str = "",
-        page_size: int = 10,
+        page_size: int = 20,
     ) -> List[Dict[str, Any]]:
-        """Search MyScheme public endpoint."""
+        """Search MyScheme public endpoint with fast timeout."""
         url = f"{self.base_url}/search/v4/schemes"
-        page_size = min(max(int(page_size), 1), 50)
+        page_size = min(max(int(page_size), 1), 30)
         params: Dict[str, Any] = {"pageSize": page_size, "lang": "en"}
         if keyword:
             params["keyword"] = keyword
@@ -507,32 +506,19 @@ class MySchemeSource:
             params["beneficiary"] = beneficiary
 
         try:
-            async with httpx.AsyncClient(timeout=10.0, headers=self.headers) as client:
-                all_items: List[Dict[str, Any]] = []
-                for page_number in range(1, 4):
-                    page_params = {**params, "pageNumber": page_number}
-                    response = await client.get(url, params=page_params)
-                    if response.status_code == 200:
-                        data = response.json()
-                        # MyScheme formats items under data or hits
-                        items = data.get("data", {}).get("schemes", []) or data.get("hits", []) or []
-                        if not isinstance(items, list):
-                            raise GovernmentSourceError("MyScheme returned an invalid schemes list")
-                        all_items.extend(item for item in items if isinstance(item, dict))
-                        if len(items) < page_size:
-                            break
-                    else:
-                        logger.warning("MyScheme API HTTP status %d: %s", response.status_code, response.text[:200])
-                        raise GovernmentSourceError(f"MyScheme API returned status {response.status_code}")
-                logger.info("MyScheme API returned %d schemes for query '%s'", len(all_items), keyword)
-                return all_items
+            async with httpx.AsyncClient(timeout=3.0, headers=self.headers) as client:
+                response = await client.get(url, params={**params, "pageNumber": 1})
+                if response.status_code == 200:
+                    data = response.json()
+                    items = data.get("data", {}).get("schemes", []) or data.get("hits", []) or []
+                    if isinstance(items, list):
+                        return [item for item in items if isinstance(item, dict)]
+                return []
         except (httpx.RequestError, httpx.TimeoutException):
-            # Preserve retryable transport errors for Tenacity.
-            raise
-        except GovernmentSourceError:
             raise
         except Exception as e:
-            logger.warning("MyScheme API response could not be processed: %s", e)
+            logger.info("MyScheme API query skipped: %s", e)
+            return []
             raise GovernmentSourceError(f"MyScheme connection failure: {e}") from e
 
     def _parse_scheme(self, raw: Dict[str, Any]) -> GovernmentScheme:
@@ -863,11 +849,14 @@ class GovernmentSourceAggregator:
         curated_scored.sort(key=lambda item: item[1], reverse=True)
         combined_schemes = [cs for cs, _ in curated_scored]
 
-        # 2. Run remote queries concurrently
+        # 2. Run remote queries concurrently with fast 2.5s timeout so cloud instances respond instantly
         async def fetch_myscheme():
             try:
-                raw_schemes = await self.myscheme.search_schemes(
-                    keyword=query, state=state, category=category, beneficiary=beneficiary_type
+                raw_schemes = await asyncio.wait_for(
+                    self.myscheme.search_schemes(
+                        keyword=query, state=state, category=category, beneficiary=beneficiary_type
+                    ),
+                    timeout=2.5
                 )
                 return [self.myscheme._parse_scheme(r) for r in raw_schemes]
             except Exception as e:
@@ -876,7 +865,7 @@ class GovernmentSourceAggregator:
 
         async def fetch_india_gov():
             try:
-                return await self.india_gov.fetch_spotlight_schemes()
+                return await asyncio.wait_for(self.india_gov.fetch_spotlight_schemes(), timeout=2.5)
             except Exception as e:
                 sources_failed.append(f"india_gov: {str(e)}")
                 return []

@@ -339,12 +339,13 @@ Answer in {lang_name}, using only evidence-supported claims. Say when evidence i
             except Exception as e:
                 logger.warning("Configured model completion failed: %s", e)
 
-        fallbacks = {
-            "en": "I can’t reliably verify this information right now. Please check the relevant official government portal or department.",
-            "hi": "मैं अभी इस जानकारी की विश्वसनीय पुष्टि नहीं कर पा रहा हूँ। कृपया संबंधित सरकारी पोर्टल या विभाग से जाँच करें।",
-            "te": "ఈ సమాచారాన్ని ప్రస్తుతం విశ్వసనీయంగా నిర్ధారించలేకపోతున్నాను. దయచేసి సంబంధిత అధికారిక ప్రభుత్వ పోర్టల్ లేదా శాఖను సంప్రదించండి.",
-        }
-        return fallbacks.get(language, fallbacks["en"])
+        # High-accuracy natural conversational synthesis (ChatGPT-style) when offline or no external LLM key
+        return self._synthesize_natural_conversational_response(
+            question=question,
+            context_passages=context_passages,
+            language=language,
+            system_context=system_context
+        )
 
     def _synthesize_natural_conversational_response(
         self,

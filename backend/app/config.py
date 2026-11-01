@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     # Server Host and Port
     BACKEND_HOST: str = "0.0.0.0"
     BACKEND_PORT: int = 8000
+    PORT: int = 8000
     DEBUG: bool = False
     
     # Allowed CORS Origins (comma-separated string or list)
