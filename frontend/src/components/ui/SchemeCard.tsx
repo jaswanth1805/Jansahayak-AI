@@ -28,7 +28,6 @@ import {
   Users,
   FileCheck,
   ChevronRight,
-  ShieldCheck,
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -154,12 +153,11 @@ export function SchemeCard({
             {formattedDate ? (
               <span className="flex items-center gap-1">
                 <Calendar className="w-3 h-3 text-slate-400" />
-                Verified: {formattedDate}
+                Source fetched: {formattedDate}
               </span>
             ) : (
-              <span className="flex items-center gap-1 text-emerald-700">
-                <ShieldCheck className="w-3 h-3" />
-                Official Data
+              <span className="flex items-center gap-1 text-amber-700">
+                {scheme.source === "curated_registry" ? "Curated reference — not freshly checked" : "Source date unavailable"}
               </span>
             )}
 

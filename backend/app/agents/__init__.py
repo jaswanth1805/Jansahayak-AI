@@ -9,7 +9,6 @@ from app.agents.tools import (
     analyze_scheme_eligibility,
     translate_response,
     generate_voice_response,
-    verify_source_and_citations,
 )
 
 __all__ = [
@@ -22,5 +21,4 @@ __all__ = [
     "analyze_scheme_eligibility",
     "translate_response",
     "generate_voice_response",
-    "verify_source_and_citations",
 ]

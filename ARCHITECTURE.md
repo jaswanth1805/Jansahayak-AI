@@ -33,7 +33,7 @@ flowchart TD
         Retrieve["2. Retrieve Information"]
         Extract["3. Extract Key Facts"]
         Evaluate["4. Evaluate Eligibility"]
-        Verify["5. Verify Claims & Citations"]
+        Verify["5. Record source limitations"]
         Generate["6. Generate Response"]
         Suggest["7. Follow-up Suggestions"]
         Audio["8. Audio Synthesis"]
@@ -55,7 +55,6 @@ flowchart TD
     subgraph External_Sources["Official External Government Portals"]
         MyScheme["MyScheme API (api.myscheme.gov.in)"]
         IndiaGov["India.gov.in Portal"]
-        DataGov["Data.gov.in (CKAN Open Data API)"]
         Flagship["Curated Flagship Schemes Registry"]
     end
 
@@ -94,7 +93,6 @@ flowchart TD
     Voice_Service --> AudioCache
     Gov_Aggregator --> MyScheme
     Gov_Aggregator --> IndiaGov
-    Gov_Aggregator --> DataGov
     Gov_Aggregator --> Flagship
 ```
 
@@ -137,9 +135,8 @@ sequenceDiagram
     end
 
     rect rgb(255, 245, 245)
-        Note over Orchestrator: STEP 4: Claim Verification
-        Orchestrator->>Orchestrator: verify_source_and_citations()
-        Orchestrator->>Orchestrator: Match claims against official URLs (nha.gov.in, pmkisan.gov.in)
+        Note over Orchestrator: STEP 4: Eligibility and evidence limitations
+        Orchestrator->>Orchestrator: Require profile data for eligibility; do not claim independent fact verification
     end
 
     rect rgb(248, 248, 255)
@@ -177,7 +174,7 @@ flowchart LR
     Query["Citizen Question"] --> QueryEmbed["Query Embedding"]
     QueryEmbed --> Search["Cosine Similarity Search\n(top_k=4)"]
     Index --> Search
-    Search --> Grounded["Grounded System Prompt\n(Sources + Page Numbers)"]
+    Search --> Grounded["Evidence-aware prompt\n(Untrusted sources + Page Numbers)"]
     Grounded --> LLM["LLM Synthesis"]
     LLM --> Result["Simplified Citizen Answer\n+ Page-level Citations"]
 ```

@@ -4,7 +4,7 @@
 import * as React from "react";
 
 const TOAST_LIMIT = 3;
-const TOAST_REMOVE_DELAY = 1000000;
+const TOAST_REMOVE_DELAY = 4000;
 
 export type ToastActionElement = React.ReactElement;
 
@@ -95,6 +95,14 @@ const listeners: Array<(state: State) => void> = [];
 let memoryState: State = { toasts: [] };
 
 function dispatch(action: Action) {
+  const affectedIds = action.type === "DISMISS_TOAST" || action.type === "REMOVE_TOAST"
+    ? (action.toastId ? [action.toastId] : [...toastTimeouts.keys()])
+    : [];
+  for (const id of affectedIds) {
+    const timer = toastTimeouts.get(id);
+    if (timer) clearTimeout(timer);
+    toastTimeouts.delete(id);
+  }
   memoryState = reducer(memoryState, action);
   listeners.forEach((listener) => {
     listener(memoryState);
@@ -120,9 +128,10 @@ function toast({
     },
   });
 
-  setTimeout(() => {
-    dispatch({ type: "DISMISS_TOAST", toastId: id });
-  }, 4000);
+  const timer = setTimeout(() => {
+    dispatch({ type: "REMOVE_TOAST", toastId: id });
+  }, TOAST_REMOVE_DELAY);
+  toastTimeouts.set(id, timer);
 
   return {
     id,

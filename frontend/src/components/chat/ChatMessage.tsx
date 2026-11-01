@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ExtendedChatMessage } from "@/hooks/useChat";
@@ -41,7 +41,12 @@ export function ChatMessage({
   const [copied, setCopied] = useState(false);
   const [localAudioUrl, setLocalAudioUrl] = useState<string | null>(message.audio_url || null);
   const [isSynthesizing, setIsSynthesizing] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isUser = message.role === "user";
+
+  useEffect(() => () => {
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+  }, []);
 
   const handleAudioToggle = async () => {
     if (isPlayingAudio) {
@@ -75,9 +80,15 @@ export function ChatMessage({
   };
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(message.content);
+    void navigator.clipboard.writeText(message.content).catch((err) => {
+      console.warn("Could not copy message to clipboard:", err);
+    });
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => {
+      setCopied(false);
+      copyTimer.current = null;
+    }, 2000);
   };
 
   const formattedTime = message.timestamp

@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import logging
 import re
 import string
+from urllib.parse import quote, urlparse
 from typing import List, Dict, Any, Optional
 import httpx
 from bs4 import BeautifulSoup
@@ -21,6 +22,12 @@ from app.config import get_settings
 from app.models.schemas import GovernmentScheme
 
 logger = logging.getLogger(__name__)
+
+
+def _is_official_government_url(value: str) -> bool:
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    return parsed.scheme == "https" and any(host.endswith(suffix) for suffix in (".gov.in", ".nic.in"))
 
 
 class GovernmentSourceError(Exception):
@@ -488,40 +495,52 @@ class MySchemeSource:
     ) -> List[Dict[str, Any]]:
         """Search MyScheme public endpoint."""
         url = f"{self.base_url}/search/v4/schemes"
-        params: Dict[str, Any] = {
-            "pageSize": page_size,
-            "pageNumber": 1,
-            "lang": "en",
-        }
+        page_size = min(max(int(page_size), 1), 50)
+        params: Dict[str, Any] = {"pageSize": page_size, "lang": "en"}
         if keyword:
             params["keyword"] = keyword
         if state:
             params["state"] = state
         if category:
             params["category"] = category
+        if beneficiary:
+            params["beneficiary"] = beneficiary
 
         try:
-            async with httpx.AsyncClient(timeout=10.0, headers=self.headers, verify=False) as client:
-                response = await client.get(url, params=params)
-                if response.status_code == 200:
-                    data = response.json()
-                    # MyScheme formats items under data or hits
-                    items = data.get("data", {}).get("schemes", []) or data.get("hits", []) or []
-                    logger.info("MyScheme API returned %d schemes for query '%s'", len(items), keyword)
-                    return items
-                else:
-                    logger.warning("MyScheme API HTTP status %d: %s", response.status_code, response.text[:200])
-                    raise GovernmentSourceError(f"MyScheme API returned status {response.status_code}")
+            async with httpx.AsyncClient(timeout=10.0, headers=self.headers) as client:
+                all_items: List[Dict[str, Any]] = []
+                for page_number in range(1, 4):
+                    page_params = {**params, "pageNumber": page_number}
+                    response = await client.get(url, params=page_params)
+                    if response.status_code == 200:
+                        data = response.json()
+                        # MyScheme formats items under data or hits
+                        items = data.get("data", {}).get("schemes", []) or data.get("hits", []) or []
+                        if not isinstance(items, list):
+                            raise GovernmentSourceError("MyScheme returned an invalid schemes list")
+                        all_items.extend(item for item in items if isinstance(item, dict))
+                        if len(items) < page_size:
+                            break
+                    else:
+                        logger.warning("MyScheme API HTTP status %d: %s", response.status_code, response.text[:200])
+                        raise GovernmentSourceError(f"MyScheme API returned status {response.status_code}")
+                logger.info("MyScheme API returned %d schemes for query '%s'", len(all_items), keyword)
+                return all_items
+        except (httpx.RequestError, httpx.TimeoutException):
+            # Preserve retryable transport errors for Tenacity.
+            raise
+        except GovernmentSourceError:
+            raise
         except Exception as e:
-            logger.warning("MyScheme API call failed (%s). Falling back to curated registry.", e)
+            logger.warning("MyScheme API response could not be processed: %s", e)
             raise GovernmentSourceError(f"MyScheme connection failure: {e}") from e
 
     def _parse_scheme(self, raw: Dict[str, Any]) -> GovernmentScheme:
         """Map MyScheme JSON schema to internal GovernmentScheme model."""
         now = datetime.now(timezone.utc)
-        scheme_id = str(raw.get("id") or raw.get("slug") or raw.get("schemeId") or "scheme")
-        name = raw.get("name") or raw.get("schemeName") or "Government Scheme"
-        description = raw.get("description") or raw.get("briefDescription") or raw.get("details", "")
+        scheme_id = str(raw.get("id") or raw.get("slug") or raw.get("schemeId") or "scheme")[:120]
+        name = str(raw.get("name") or raw.get("schemeName") or "Government Scheme")[:200]
+        description = str(raw.get("description") or raw.get("briefDescription") or raw.get("details", ""))[:5000]
         
         # Extract criteria & benefits safely
         benefits = raw.get("benefits", [])
@@ -535,24 +554,44 @@ class MySchemeSource:
         docs = raw.get("documentsRequired", []) or raw.get("documents", [])
         if isinstance(docs, str):
             docs = [docs]
+        beneficiaries = raw.get("beneficiaries", [])
+        if isinstance(beneficiaries, str):
+            beneficiaries = [beneficiaries]
+        if not isinstance(benefits, list):
+            benefits = []
+        if not isinstance(criteria, list):
+            criteria = []
+        if not isinstance(docs, list):
+            docs = []
+        if not isinstance(beneficiaries, list):
+            beneficiaries = []
+        benefits = [str(item)[:500] for item in benefits[:30] if isinstance(item, (str, int, float))]
+        criteria = [str(item)[:1000] for item in criteria[:50] if isinstance(item, (str, int, float))]
+        docs = [str(item)[:300] for item in docs[:30] if isinstance(item, (str, int, float))]
+        official_url = str(raw.get("schemeUrl") or "")
+        if not _is_official_government_url(official_url):
+            official_url = f"https://www.myscheme.gov.in/schemes/{quote(scheme_id, safe='')}"
+        application_url = str(raw.get("applicationUrl") or raw.get("applyUrl") or "")
+        if not _is_official_government_url(application_url):
+            application_url = None
 
         return GovernmentScheme(
             id=scheme_id,
             name=name,
-            name_hindi=raw.get("nameHindi"),
-            name_telugu=raw.get("nameTelugu"),
+            name_hindi=str(raw.get("nameHindi"))[:200] if raw.get("nameHindi") else None,
+            name_telugu=str(raw.get("nameTelugu"))[:200] if raw.get("nameTelugu") else None,
             description=description,
             ministry=raw.get("ministryName") or raw.get("department"),
             state=raw.get("stateName"),
-            beneficiary_types=raw.get("beneficiaries", []),
+            beneficiary_types=[str(item)[:200] for item in beneficiaries[:30] if isinstance(item, (str, int, float))],
             benefits=benefits,
             eligibility_criteria=criteria,
             required_documents=docs,
-            application_url=raw.get("applicationUrl") or raw.get("applyUrl"),
-            official_url=raw.get("schemeUrl") or f"https://www.myscheme.gov.in/schemes/{scheme_id}",
+            application_url=application_url,
+            official_url=official_url,
             source="myscheme",
             last_verified=now,
-            category=raw.get("categoryName") or raw.get("category"),
+            category=str(raw.get("categoryName") or raw.get("category"))[:200] if (raw.get("categoryName") or raw.get("category")) else None,
         )
 
 
@@ -603,6 +642,9 @@ class IndiaGovScraper:
                     return spotlight_items
                 else:
                     raise GovernmentSourceError(f"india.gov.in responded with {response.status_code}")
+        except (httpx.RequestError, httpx.TimeoutException):
+            # Keep transport failures visible to Tenacity so its retry policy runs.
+            raise
         except Exception as e:
             logger.warning("IndiaGovScraper could not scrape spotlight: %s", e)
             return []
@@ -642,6 +684,8 @@ class DataGovSource:
                 else:
                     logger.warning("DataGovSource returned %d", response.status_code)
                     return []
+        except (httpx.RequestError, httpx.TimeoutException):
+            raise
         except Exception as e:
             logger.debug("DataGovSource query error: %s", e)
             return []
@@ -654,7 +698,10 @@ class GovernmentSourceAggregator:
         self.myscheme = MySchemeSource()
         self.india_gov = IndiaGovScraper()
         self.data_gov = DataGovSource()
-        self.curated_schemes = [GovernmentScheme(**scheme) for scheme in CURATED_FLAGSHIP_SCHEMES]
+        self.curated_schemes = [
+            GovernmentScheme(**{**scheme, "source": "curated_registry", "last_verified": None})
+            for scheme in CURATED_FLAGSHIP_SCHEMES
+        ]
 
     def compute_scheme_relevance(self, query: str, scheme: GovernmentScheme) -> float:
         """Calculate high-precision relevance score between a query and a scheme."""
@@ -740,6 +787,53 @@ class GovernmentSourceAggregator:
 
         return score
 
+    @staticmethod
+    def _filter_words(text: str) -> set[str]:
+        stop_words = {"and", "of", "the", "for"}
+        aliases = {"financial": "finance", "services": "service"}
+        words = set(re.findall(r"[\w]+", text.casefold())) - stop_words
+        normalized = set()
+        for word in words:
+            if len(word) > 4 and word.endswith("ies"):
+                word = word[:-3] + "y"
+            elif len(word) > 3 and word.endswith("s"):
+                word = word[:-1]
+            normalized.add(aliases.get(word, word))
+        return normalized
+
+    @classmethod
+    def _matches_filter(cls, value: str, candidates: List[str]) -> bool:
+        """Match all requested beneficiary terms without accepting partial overlaps."""
+        requested = cls._filter_words(value)
+        if not requested:
+            return True
+        for candidate in candidates:
+            candidate_words = cls._filter_words(candidate)
+            if requested and requested.issubset(candidate_words):
+                return True
+        return False
+
+    @classmethod
+    def _matches_category(cls, value: str, candidates: List[str]) -> bool:
+        """Allow broad directory categories to match more specific scheme labels."""
+        requested = cls._filter_words(value)
+        if not requested:
+            return True
+        return any(
+            words and (words.issubset(requested) or requested.issubset(words))
+            for words in (cls._filter_words(candidate) for candidate in candidates)
+        )
+
+    @staticmethod
+    def _matches_state(value: str, scheme_state: Optional[str]) -> bool:
+        if not value or not scheme_state:
+            return True
+        state_value = " ".join(value.casefold().split())
+        scheme_value = " ".join(scheme_state.casefold().split())
+        if "central" in scheme_value or "all states" in scheme_value or "all india" in scheme_value:
+            return True
+        return state_value in scheme_value or scheme_value in state_value
+
     async def search_all(
         self,
         query: str = "",
@@ -748,7 +842,7 @@ class GovernmentSourceAggregator:
         beneficiary_type: str = "",
     ) -> Dict[str, Any]:
         """Search all sources concurrently. Return combined results with source info."""
-        sources_queried = ["myscheme", "india_gov", "data_gov", "curated_registry"]
+        sources_queried = ["myscheme", "india_gov", "curated_registry"]
         sources_failed = []
         combined_schemes: List[GovernmentScheme] = []
 
@@ -757,9 +851,10 @@ class GovernmentSourceAggregator:
 
         curated_scored = []
         for cs in self.curated_schemes:
-            match_state = (not state or not cs.state or state.lower() in cs.state.lower())
-            match_cat = (not category or (cs.category and category.lower() in cs.category.lower()))
-            if match_state and match_cat:
+            match_state = self._matches_state(state, cs.state)
+            match_cat = self._matches_category(category, [cs.category] if cs.category else [])
+            match_beneficiary = self._matches_filter(beneficiary_type, cs.beneficiary_types)
+            if match_state and match_cat and match_beneficiary:
                 s_score = self.compute_scheme_relevance(query, cs)
                 if not q_lower or s_score > 0:
                     curated_scored.append((cs, s_score))
@@ -787,7 +882,7 @@ class GovernmentSourceAggregator:
                 return []
 
         # Execute live queries concurrently
-        myscheme_results, _ = await asyncio.gather(
+        myscheme_results, india_gov_results = await asyncio.gather(
             fetch_myscheme(),
             fetch_india_gov(),
             return_exceptions=True
@@ -803,12 +898,48 @@ class GovernmentSourceAggregator:
                         combined_schemes.append(scheme)
                         seen_ids.add(scheme.id)
 
+        if isinstance(india_gov_results, list):
+            seen_ids = {scheme.id for scheme in combined_schemes}
+            for item in india_gov_results:
+                title = str(item.get("title") or "").strip()
+                url = str(item.get("url") or "").strip()
+                if not title or not _is_official_government_url(url):
+                    continue
+                scheme_id = "india-gov-" + re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40]
+                if scheme_id in seen_ids:
+                    continue
+                scheme = GovernmentScheme(
+                    id=scheme_id,
+                    name=title[:200],
+                    description=str(item.get("description") or "").strip()[:2000],
+                    beneficiary_types=[],
+                    benefits=[],
+                    eligibility_criteria=[],
+                    required_documents=[],
+                    official_url=url,
+                    source="india_gov",
+                    last_verified=datetime.now(timezone.utc),
+                )
+                relevance = self.compute_scheme_relevance(query, scheme)
+                if not q_lower or relevance > 0:
+                    combined_schemes.append(scheme)
+                    seen_ids.add(scheme_id)
+
         # Final sort by relevance score descending
         if q_lower:
             combined_schemes.sort(
                 key=lambda s: self.compute_scheme_relevance(query, s),
                 reverse=True
             )
+
+        # APIs may ignore optional filters or return incomplete metadata; enforce
+        # every requested filter locally on all providers' results as well.
+        combined_schemes = [
+            scheme for scheme in combined_schemes
+            if self._matches_state(state, scheme.state)
+            and self._matches_category(category, [scheme.category] if scheme.category else [])
+            and self._matches_filter(beneficiary_type, scheme.beneficiary_types)
+        ]
 
         return {
             "schemes": combined_schemes,
@@ -830,14 +961,9 @@ class GovernmentSourceAggregator:
             results = await self.myscheme.search_schemes(keyword=scheme_id, page_size=5)
             for raw in results:
                 parsed = self.myscheme._parse_scheme(raw)
-                if parsed.id == scheme_id or scheme_id in parsed.id:
+                if parsed.id == scheme_id:
                     return parsed
         except Exception as e:
             logger.warning("Failed to fetch remote scheme details for %s: %s", scheme_id, e)
-
-        # 3. Fallback: match by partial ID across curated list
-        for scheme in self.curated_schemes:
-            if scheme_id.lower() in scheme.id.lower() or scheme_id.lower() in scheme.name.lower():
-                return scheme
 
         return None

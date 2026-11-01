@@ -4,11 +4,11 @@ Provides automated citizen eligibility checks against central and state governme
 complete with ranking, checklist of required documents, and dynamic questionnaires.
 """
 
-from datetime import datetime, timezone
 import json
 import logging
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status, Depends
+from starlette.concurrency import run_in_threadpool
 
 from app.models.schemas import (
     EligibilityProfile,
@@ -20,6 +20,7 @@ from app.services.government_sources import GovernmentSourceAggregator
 from app.services.llm_service import LLMService
 from app.agents.tools import analyze_scheme_eligibility
 from app.utils.language import translate_text
+from app.utils.rate_limit import eligibility_limit, eligibility_capacity
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,9 @@ STATUS_PRIORITY = {
 async def check_eligibility(
     profile: EligibilityProfile,
     scheme_query: str = Query(default="", description="Optional keyword to filter evaluated schemes"),
-    language: str = Query(default="en", description="Target language code")
+    language: str = Query(default="en", pattern="^(en|hi|te)$", description="Target language code"),
+    _: None = Depends(eligibility_limit),
+    __: None = Depends(eligibility_capacity),
 ) -> List[EligibilityResult]:
     """Check citizen eligibility against welfare schemes based on submitted profile.
     
@@ -56,7 +59,9 @@ async def check_eligibility(
 
     if not schemes:
         # If no schemes matched query, fall back to all curated schemes
-        schemes = _gov_aggregator.curated_schemes
+        # An empty filtered result is meaningful. Do not silently replace it
+        # with unrelated schemes that ignore the user's requested filters.
+        return []
 
     results: List[EligibilityResult] = []
     user_dict = profile.model_dump()
@@ -66,15 +71,14 @@ async def check_eligibility(
         scheme_dict = scheme.model_dump()
         analysis = await analyze_scheme_eligibility(scheme_data=scheme_dict, user_profile=user_dict)
 
-        now = datetime.now(timezone.utc)
         citation = SourceCitation(
             title=scheme.name,
             url=scheme.official_url,
-            source_type="official_api",
+            source_type="official_api" if scheme.last_verified else "curated_reference",
             page_number=None,
             section="Eligibility Criteria",
-            retrieved_at=now,
-            is_verified=True,
+            retrieved_at=scheme.last_verified,
+            is_verified=scheme.last_verified is not None,
         )
 
         res_item = EligibilityResult(
@@ -92,11 +96,11 @@ async def check_eligibility(
 
         # Optional translation of criteria feedback if language != "en"
         if language in ("hi", "te"):
-            res_item.satisfied_conditions = [translate_text(c, target_language=language) for c in res_item.satisfied_conditions]
-            res_item.unsatisfied_conditions = [translate_text(c, target_language=language) for c in res_item.unsatisfied_conditions]
-            res_item.missing_information = [translate_text(c, target_language=language) for c in res_item.missing_information]
-            res_item.application_steps = [translate_text(s, target_language=language) for s in res_item.application_steps]
-            res_item.disclaimer = translate_text(res_item.disclaimer, target_language=language)
+            res_item.satisfied_conditions = [await run_in_threadpool(translate_text, c, target_language=language) for c in res_item.satisfied_conditions]
+            res_item.unsatisfied_conditions = [await run_in_threadpool(translate_text, c, target_language=language) for c in res_item.unsatisfied_conditions]
+            res_item.missing_information = [await run_in_threadpool(translate_text, c, target_language=language) for c in res_item.missing_information]
+            res_item.application_steps = [await run_in_threadpool(translate_text, s, target_language=language) for s in res_item.application_steps]
+            res_item.disclaimer = await run_in_threadpool(translate_text, res_item.disclaimer, target_language=language)
 
         results.append(res_item)
 
@@ -181,9 +185,9 @@ async def get_eligibility_questions(
     # Translate questions if language != "en"
     if language in ("hi", "te"):
         for q in questions:
-            q["question"] = translate_text(q["question"], target_language=language)
+            q["question"] = await run_in_threadpool(translate_text, q["question"], target_language=language)
             if "options" in q:
-                q["options"] = [translate_text(opt, target_language=language) for opt in q["options"]]
+                q["options"] = [await run_in_threadpool(translate_text, opt, target_language=language) for opt in q["options"]]
 
     return {
         "scheme_id": scheme.id,

@@ -10,7 +10,13 @@ param(
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BACKEND = Join-Path $ROOT "backend"
 $FRONTEND = Join-Path $ROOT "frontend"
-$PYTHON = "C:\Users\kanak\AppData\Local\Programs\Python\Python314\python.exe"
+$VENV_PYTHON = Join-Path $ROOT ".venv\Scripts\python.exe"
+if (!(Test-Path $VENV_PYTHON)) {
+    $SYSTEM_PYTHON = (Get-Command python -ErrorAction Stop).Source
+    & $SYSTEM_PYTHON -m venv (Join-Path $ROOT ".venv")
+    if ($LASTEXITCODE -ne 0) { throw "Could not create the project virtual environment." }
+}
+$PYTHON = $VENV_PYTHON
 
 Write-Host ""
 Write-Host "================================" -ForegroundColor Cyan
@@ -40,6 +46,7 @@ if ($envContent -match "your_openai_api_key_here") {
 if (!$SkipInstall -and !$FrontendOnly) {
     Write-Host "Installing Python dependencies..." -ForegroundColor Green
     & $PYTHON -m pip install -r (Join-Path $BACKEND "requirements.txt") --quiet
+    if ($LASTEXITCODE -ne 0) { throw "Could not install backend dependencies." }
     Write-Host "Python dependencies installed." -ForegroundColor Green
 }
 
@@ -48,7 +55,9 @@ if (!$SkipInstall -and !$BackendOnly) {
     Write-Host "Installing npm dependencies..." -ForegroundColor Green
     Push-Location $FRONTEND
     npm install --legacy-peer-deps --silent
+    $installExitCode = $LASTEXITCODE
     Pop-Location
+    if ($installExitCode -ne 0) { throw "Could not install frontend dependencies." }
     Write-Host "npm dependencies installed." -ForegroundColor Green
 }
 

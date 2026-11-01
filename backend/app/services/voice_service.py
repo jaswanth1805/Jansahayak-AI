@@ -5,10 +5,10 @@ supporting English, Hindi, and Telugu with local caching and non-blocking asynch
 """
 
 import asyncio
-import hashlib
 import logging
 import os
 import re
+import secrets
 import time
 from typing import Optional
 from gtts import gTTS
@@ -69,9 +69,9 @@ class VoiceService:
 
         target_lang = self._get_lang_code(language)
         
-        # Create deterministic hash for caching identical utterances
-        content_hash = hashlib.md5(f"{target_lang}:{clean_text}".encode("utf-8")).hexdigest()
-        audio_id = f"{content_hash}_{target_lang}"
+        # Use an unguessable capability: IDs derived from text allow dictionary
+        # attacks against cached speech containing personal information.
+        audio_id = f"a_{secrets.token_urlsafe(24)}"
         filename = f"{audio_id}.mp3"
         file_path = os.path.join(self.audio_dir, filename)
 
@@ -89,15 +89,20 @@ class VoiceService:
             logger.info("Generated TTS audio '%s' for language '%s'", audio_id, target_lang)
             return f"/api/voice/audio/{audio_id}"
         except Exception as err:
+            try:
+                os.remove(file_path)
+            except FileNotFoundError:
+                pass
             logger.error("gTTS generation error for text (%s): %s", clean_text[:40], err)
             raise RuntimeError(f"Text-to-speech synthesis failed: {err}") from err
 
     def get_audio_path(self, audio_id: str) -> Optional[str]:
         """Retrieve the absolute disk path for a given audio ID if it exists."""
-        # Sanitize audio_id to prevent directory traversal
-        safe_id = os.path.basename(audio_id)
-        if not safe_id.endswith(".mp3"):
-            safe_id = f"{safe_id}.mp3"
+        # Only accept newly generated, random capability IDs; legacy content hashes
+        # are intentionally no longer routable.
+        if not re.fullmatch(r"a_[A-Za-z0-9_-]{32}", audio_id):
+            return None
+        safe_id = f"{audio_id}.mp3"
             
         target_path = os.path.join(self.audio_dir, safe_id)
         if os.path.isfile(target_path):

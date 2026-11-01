@@ -65,10 +65,10 @@ export function Footer() {
             </ul>
           </div>
 
-          {/* Column 3: Official Data Sources */}
+          {/* Column 3: Government portal links */}
           <div>
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 mb-3">
-              Official Data Sources
+              Government Portals
             </h4>
             <ul className="space-y-2 text-xs text-slate-300">
               <li>
@@ -103,7 +103,7 @@ export function Footer() {
               </li>
               <li>
                 <Link href="/about" className="hover:text-white transition">
-                  View All Verified Sources
+                  View Portal Directory
                 </Link>
               </li>
             </ul>
@@ -120,8 +120,9 @@ export function Footer() {
                 <span>Disclaimer</span>
               </div>
               JanSahayak AI is an independent civic tech initiative. We do not
-              claim to be a government authority. All scheme verifications link
-              directly to official government portals.
+              claim to be a government authority. Source links are shown when
+              available; confirm current eligibility and application rules with
+              the responsible department before relying on them.
             </div>
             <div className="mt-3 text-xs text-slate-400">
               <Link href="/about#privacy" className="hover:underline mr-3">

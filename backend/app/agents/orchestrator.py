@@ -23,7 +23,6 @@ from app.agents.tools import (
     search_official_sources,
     retrieve_relevant_passages,
     analyze_scheme_eligibility,
-    verify_source_and_citations,
 )
 from app.utils.language import LANGUAGE_PROMPTS, LANGUAGE_NAMES, translate_text
 
@@ -187,11 +186,19 @@ class JanSahayakOrchestrator:
         }
 
     async def _node_retrieve_official_schemes(self, state: AgentState) -> Dict[str, Any]:
-        """Query official government repositories (MyScheme, India.gov.in, Data.gov.in)."""
+        """Query MyScheme and India.gov.in alongside the curated reference registry."""
         query = state["user_message"]
         state_filter = state.get("user_profile", {}).get("state", "") if state.get("user_profile") else ""
-        
-        res = await search_official_sources(query=query, state=state_filter)
+        previous_user_query = next((
+            str(turn.get("content", ""))[:1000]
+            for turn in reversed(state.get("conversation_history", []))
+            if turn.get("role") == "user" and isinstance(turn.get("content"), str)
+        ), "")
+        follow_up_markers = (" it", " this", " that", " its", " they", " those", "what about", "how about")
+        is_follow_up = len(query.split()) <= 8 or any(marker in f" {query.casefold()}" for marker in follow_up_markers)
+        contextual_query = f"{previous_user_query} {query}"[-2000:] if is_follow_up and previous_user_query else query
+
+        res = await search_official_sources(query=contextual_query, state=state_filter)
         schemes = res.get("schemes", [])
         
         step_desc = f"Searched official government portals (MyScheme, India.gov.in); retrieved {len(schemes)} relevant schemes."
@@ -211,11 +218,11 @@ class JanSahayakOrchestrator:
             sources.append({
                 "title": scheme.get("name", "Government Scheme"),
                 "url": scheme.get("official_url") or scheme.get("application_url"),
-                "source_type": "official_api",
+                "source_type": "official_api" if scheme.get("last_verified") else "curated_reference",
                 "page_number": None,
                 "section": scheme.get("category"),
-                "retrieved_at": now,
-                "is_verified": True,
+                "retrieved_at": scheme.get("last_verified"),
+                "is_verified": bool(scheme.get("last_verified")),
             })
 
         # Format sources from document passages
@@ -228,10 +235,10 @@ class JanSahayakOrchestrator:
                 "page_number": meta.get("page_num"),
                 "section": f"Page {meta.get('page_num')}",
                 "retrieved_at": now,
-                "is_verified": True,
+                "is_verified": False,
             })
 
-        step_desc = f"Consolidated {len(sources)} official source citations."
+        step_desc = f"Collected {len(sources)} source references."
         return {
             "sources": sources,
             "agent_steps": [step_desc],
@@ -241,6 +248,10 @@ class JanSahayakOrchestrator:
         """Evaluate citizen eligibility against the retrieved scheme."""
         schemes = state.get("retrieved_schemes", [])
         profile = state.get("user_profile") or {}
+
+        if state.get("intent") == "eligibility_check" and not profile:
+            step_desc = "Eligibility was not assessed because no citizen profile was provided."
+            return {"eligibility_results": None, "agent_steps": [step_desc]}
         
         if not schemes:
             step_desc = "Eligibility check skipped: No matching scheme found to evaluate against."
@@ -257,13 +268,8 @@ class JanSahayakOrchestrator:
         }
 
     async def _node_verify_claims(self, state: AgentState) -> Dict[str, Any]:
-        """Verify factual consistency between sources and claims."""
-        sources = state.get("retrieved_schemes", [])
-        claims = [state["user_message"]]
-        verification = await verify_source_and_citations(claims, sources)
-        
-        confidence = verification.get("confidence_score", 1.0)
-        step_desc = f"Verified facts against official records (Grounding confidence: {int(confidence * 100)}%)."
+        """Record the source-limitation notice; no independent claim verifier exists."""
+        step_desc = "Prepared the response from retrieved records; confirm scheme details with the responsible department."
         return {
             "agent_steps": [step_desc],
         }
@@ -275,13 +281,26 @@ class JanSahayakOrchestrator:
         passages = state.get("retrieved_passages", [])
         eligibility = state.get("eligibility_results")
 
+        if state.get("intent") == "eligibility_check" and not state.get("user_profile"):
+            if lang_code == "hi":
+                answer = "सिर्फ़ प्रश्न के आधार पर पात्रता का आकलन नहीं किया जा सकता। कृपया उम्र, राज्य, व्यवसाय, आय और योजना से जुड़ी आवश्यक जानकारी दें, या पात्रता जाँच पृष्ठ का उपयोग करें। मैं बिना जानकारी के पात्रता का अनुमान नहीं लगाऊँगा।"
+            elif lang_code == "te":
+                answer = "ప్రశ్న ఒక్కటితో అర్హతను అంచనా వేయలేను. దయచేసి వయస్సు, రాష్ట్రం, వృత్తి, ఆదాయం మరియు పథకానికి అవసరమైన వివరాలు ఇవ్వండి లేదా అర్హత తనిఖీ పేజీని ఉపయోగించండి. సమాచారం లేకుండా అర్హతను ఊహించను."
+            else:
+                answer = "I can’t assess eligibility from a question alone. Please share the relevant details, such as age, state, occupation, income and scheme-specific information, or use the Eligibility Checker. I won’t assume an eligibility result without that information."
+            return {
+                "final_answer": answer,
+                "agent_steps": ["Asked for profile information before assessing eligibility."],
+            }
+
         # Case 1: Document Query
         if passages:
             answer = await self.llm.generate_rag_response(
                 question=state["user_message"],
                 context_passages=passages,
                 language=lang_code,
-                system_context="Answer citizen's question strictly from the uploaded guidelines. Include page citations."
+                system_context="Answer citizen's question strictly from the uploaded guidelines. Include page citations.",
+                conversation_history=state.get("conversation_history", []),
             )
             step_desc = f"Generated answer grounded in document passages in {LANGUAGE_NAMES.get(lang_code, 'English')}."
             return {"final_answer": answer, "agent_steps": [step_desc]}
@@ -312,7 +331,12 @@ class JanSahayakOrchestrator:
                         f"Documents Required: {docs_str}\n"
                         f"Official Link: {s.get('official_url')}"
                     ),
-                    "metadata": {"source": disp_name, "title": disp_name}
+                    "metadata": {
+                        "source": s.get("source", "unknown"),
+                        "title": disp_name,
+                        "source_type": "official_api" if s.get("last_verified") else "curated_reference",
+                        "retrieved_at": s.get("last_verified"),
+                    }
                 })
 
             extra_note = ""
@@ -327,9 +351,10 @@ class JanSahayakOrchestrator:
                 question=state["user_message"],
                 context_passages=context_blocks,
                 language=lang_code,
-                system_context=f"Explain the scheme clearly. If eligibility was checked, include the result in clear simple language.{extra_note}"
+                system_context=f"Explain the scheme clearly. If eligibility was checked, include the result in clear simple language.{extra_note}",
+                conversation_history=state.get("conversation_history", []),
             )
-            step_desc = f"Generated official scheme explanation in {LANGUAGE_NAMES.get(lang_code, 'English')}."
+            step_desc = f"Generated a scheme explanation from the retrieved records in {LANGUAGE_NAMES.get(lang_code, 'English')}."
             return {"final_answer": answer, "agent_steps": [step_desc]}
 
         # Case 3: General or No Specific Scheme Found
@@ -337,7 +362,8 @@ class JanSahayakOrchestrator:
             question=state["user_message"],
             context_passages=[],
             language=lang_code,
-            system_context="Provide helpful, empathetic, conversational public-welfare guidance in India for this citizen inquiry."
+            system_context="Provide helpful, empathetic, conversational public-welfare guidance in India for this citizen inquiry.",
+            conversation_history=state.get("conversation_history", []),
         )
         step_desc = f"Generated conversational public-welfare guidance in {LANGUAGE_NAMES.get(lang_code, 'English')}."
         return {"final_answer": answer, "agent_steps": [step_desc]}
@@ -469,10 +495,12 @@ class JanSahayakOrchestrator:
             }
         except Exception as err:
             logger.exception("Orchestrator pipeline failed: %s", err)
-            fallback_answer = (
-                "JanSahayak encountered an error processing your request. "
-                "Please retry in a moment or visit https://www.myscheme.gov.in."
-            )
+            fallback_answers = {
+                "en": "I couldn’t complete that request because of a service error. Please retry shortly. For current scheme details, check the responsible department’s official portal.",
+                "hi": "सेवा में समस्या के कारण आपका अनुरोध पूरा नहीं हो सका। कृपया थोड़ी देर बाद फिर प्रयास करें। वर्तमान जानकारी के लिए संबंधित विभाग के आधिकारिक पोर्टल पर जाँच करें।",
+                "te": "సేవలో సమస్య కారణంగా మీ అభ్యర్థనను పూర్తి చేయలేకపోయాను. దయచేసి కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి. ప్రస్తుత సమాచారం కోసం సంబంధిత శాఖ అధికారిక పోర్టల్‌ను చూడండి.",
+            }
+            fallback_answer = fallback_answers.get(language, fallback_answers["en"])
             return {
                 "answer": fallback_answer,
                 "language": Language(language),
@@ -480,7 +508,7 @@ class JanSahayakOrchestrator:
                 "agent_steps": ["Pipeline encountered an unexpected error."],
                 "has_audio": False,
                 "audio_url": None,
-                "suggested_questions": ["What schemes are available?"],
+                "suggested_questions": [],
                 "eligibility_data": None,
                 "session_id": session_id,
             }

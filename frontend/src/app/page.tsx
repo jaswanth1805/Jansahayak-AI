@@ -37,7 +37,7 @@ export default function HomePage() {
     {
       icon: FileText,
       title: "AI Document Understanding",
-      desc: "Upload official PDFs, guidelines, and gazette notifications. Get clear, plain-language summaries without bureaucratic jargon.",
+      desc: "Upload PDF guidelines or notices. Get plain-language summaries and page references; uploaded files are not authenticated by the service.",
       tag: "PDF Analyzer",
       href: "/documents",
     },
@@ -71,9 +71,9 @@ export default function HomePage() {
     },
     {
       icon: ShieldCheck,
-      title: "100% Verified Citations",
-      desc: "Zero hallucination guarantee. Every response links directly to verified portals like myScheme.gov.in and india.gov.in.",
-      tag: "Official Sources",
+      title: "Source-Linked Guidance",
+      desc: "Responses include available source references. Check current rules with the responsible department before applying.",
+      tag: "Check Sources",
       href: "/about",
     },
   ];
@@ -87,8 +87,8 @@ export default function HomePage() {
     },
     {
       step: "02",
-      title: "Official Verification",
-      desc: "The AI agent consults real government databases, official guidelines, and eligibility rules in real time.",
+      title: "Scheme References",
+      desc: "Search available government portals and a clearly labeled curated reference list for scheme information.",
       icon: ShieldCheck,
     },
     {
@@ -100,7 +100,7 @@ export default function HomePage() {
     {
       step: "04",
       title: "Direct Application Link",
-      desc: "Obtain official portals and application links directly to submit your forms with confidence.",
+      desc: "Find available portal and application links, then confirm current instructions before submitting.",
       icon: Landmark,
     },
   ];
@@ -175,7 +175,7 @@ export default function HomePage() {
           {/* Trust Badge */}
           <div className="flex items-center gap-2 mb-4 px-3.5 py-1 rounded-full bg-indigo-500/20 border border-indigo-400/30 text-indigo-200 text-xs font-medium">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>Official Government Data Verification Engine</span>
+            <span>Public-benefits information assistant</span>
           </div>
 
           {/* Main Headline */}
@@ -216,16 +216,16 @@ export default function HomePage() {
           {/* Quick Metrics Bar */}
           <div className="mt-14 pt-8 border-t border-white/10 grid grid-cols-2 md:grid-cols-4 gap-6 max-w-4xl w-full text-center">
             <div>
-              <div className="text-2xl sm:text-3xl font-extrabold text-white">500+</div>
-              <div className="text-xs text-slate-300 mt-0.5">Central & State Schemes</div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-white">Search</div>
+              <div className="text-xs text-slate-300 mt-0.5">Available scheme references</div>
             </div>
             <div>
               <div className="text-2xl sm:text-3xl font-extrabold text-white">3 Languages</div>
               <div className="text-xs text-slate-300 mt-0.5">English, Hindi & Telugu</div>
             </div>
             <div>
-              <div className="text-2xl sm:text-3xl font-extrabold text-emerald-400">100%</div>
-              <div className="text-xs text-slate-300 mt-0.5">Official Citations</div>
+              <div className="text-2xl sm:text-3xl font-extrabold text-emerald-400">Links</div>
+              <div className="text-xs text-slate-300 mt-0.5">Provided when available</div>
             </div>
             <div>
               <div className="text-2xl sm:text-3xl font-extrabold text-white">0 ₹</div>
@@ -241,19 +241,19 @@ export default function HomePage() {
           <div className="flex flex-wrap items-center justify-around gap-6 text-xs sm:text-sm font-semibold">
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-5 h-5 text-emerald-400" />
-              <span>No Hallucinated Data</span>
+              <span>Evidence-based responses</span>
             </div>
             <div className="flex items-center gap-2">
               <Landmark className="w-5 h-5 text-indigo-400" />
-              <span>Official Government Sources Only</span>
+              <span>Government sources and curated references</span>
             </div>
             <div className="flex items-center gap-2">
               <FileCheck2 className="w-5 h-5 text-sky-400" />
-              <span>Verified Direct Portals</span>
+              <span>Source dates shown when available</span>
             </div>
             <div className="flex items-center gap-2">
               <Clock className="w-5 h-5 text-amber-400" />
-              <span>Real-Time Policy Updates</span>
+              <span>Confirm current rules before applying</span>
             </div>
           </div>
         </div>
@@ -347,19 +347,19 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Official Government Sources Registry */}
+      {/* Government Portal Directory */}
       <section className="py-20 bg-slate-50 border-t border-slate-200">
         <div className="container mx-auto px-4 sm:px-8">
           <div className="text-center max-w-2xl mx-auto mb-12">
             <div className="flex items-center justify-center gap-2 text-emerald-700 font-bold text-xs uppercase tracking-wider mb-2">
               <ShieldCheck className="w-4 h-4" />
-              <span>Authentic Government Portals</span>
+              <span>Government Portal Directory</span>
             </div>
             <h2 className="text-3xl font-extrabold text-navy-950 tracking-tight">
-              Data Sourced Directly From Official Portals
+              Government Portals for Further Checking
             </h2>
             <p className="text-slate-600 mt-2 text-sm">
-              We never fabricate answers. JanSahayak AI indexes authorized Indian government portals.
+              These links are references; a portal may not be queried for every answer. Responses can also use curated scheme records or user-uploaded documents.
             </p>
           </div>
 
@@ -384,8 +384,8 @@ export default function HomePage() {
                   </p>
                 </div>
                 <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-muted-foreground">
-                  <span className="text-emerald-700 font-medium">● Verified Source</span>
-                  <span>Daily Sync</span>
+                  <span className="text-slate-600 font-medium">Portal link</span>
+                  <span>Not necessarily queried for each answer</span>
                 </div>
               </div>
             ))}

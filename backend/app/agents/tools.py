@@ -6,9 +6,12 @@ and perform multilingual translation and voice synthesis.
 """
 
 import logging
+import re
 from typing import Dict, Any, List, Optional
+from urllib.parse import urlparse
 import httpx
 from bs4 import BeautifulSoup
+from starlette.concurrency import run_in_threadpool
 
 from app.models.schemas import GovernmentScheme, Language
 from app.services.government_sources import GovernmentSourceAggregator
@@ -31,7 +34,7 @@ async def search_official_sources(
     category: str = "",
     beneficiary_type: str = ""
 ) -> Dict[str, Any]:
-    """Search official government sources (MyScheme, India.gov.in, Data.gov.in) for schemes.
+    """Search MyScheme and India.gov.in, then compare the results with curated references.
     
     Args:
         query: Scheme name, keyword, or citizen requirement.
@@ -77,37 +80,35 @@ async def fetch_government_document(url: str) -> Dict[str, Any]:
         Dict containing title, extracted plain text snippet, and status.
     """
     logger.info("Tool: fetch_government_document fetching URL: %s", url)
+    parsed_url = urlparse(url)
+    host = (parsed_url.hostname or "").lower().rstrip(".")
+    if parsed_url.scheme != "https" or not host.endswith(".gov.in"):
+        return {"success": False, "error": "Only HTTPS pages on government .gov.in domains are allowed."}
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) JanSahayak/1.0",
-        "Accept": "text/html,application/xhtml+xml,application/pdf"
+        "Accept": "text/html,application/xhtml+xml"
     }
     try:
-        async with httpx.AsyncClient(timeout=10.0, headers=headers, follow_redirects=True) as client:
-            resp = await client.get(url)
-            if resp.status_code == 200:
-                content_type = resp.headers.get("content-type", "")
-                if "html" in content_type:
-                    soup = BeautifulSoup(resp.text, "lxml")
-                    # Remove script and style elements
-                    for tag in soup(["script", "style", "nav", "footer"]):
-                        tag.decompose()
-                    text = " ".join(soup.get_text().split())
-                    title = soup.title.string.strip() if soup.title else url
-                    return {
-                        "success": True,
-                        "title": title,
-                        "text": text[:3000],
-                        "url": url
-                    }
-                else:
-                    return {
-                        "success": True,
-                        "title": url.split("/")[-1],
-                        "text": resp.text[:2000],
-                        "url": url
-                    }
-            else:
-                return {"success": False, "error": f"HTTP status {resp.status_code}", "url": url}
+        async with httpx.AsyncClient(timeout=10.0, headers=headers, follow_redirects=False) as client:
+            async with client.stream("GET", url) as resp:
+                if resp.is_redirect:
+                    return {"success": False, "error": "Redirects are not followed for source retrieval.", "url": url}
+                if resp.status_code != 200:
+                    return {"success": False, "error": f"HTTP status {resp.status_code}", "url": url}
+                if "html" not in resp.headers.get("content-type", "").lower():
+                    return {"success": False, "error": "The source did not return an HTML page.", "url": url}
+                body = bytearray()
+                async for chunk in resp.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) > 2 * 1024 * 1024:
+                        return {"success": False, "error": "The source page exceeds the 2 MB retrieval limit.", "url": url}
+                soup = BeautifulSoup(bytes(body), "lxml")
+                for tag in soup(["script", "style", "nav", "footer"]):
+                    tag.decompose()
+                text = " ".join(soup.get_text().split())
+                title = soup.title.get_text(strip=True) if soup.title else url
+                return {"success": True, "title": title[:300], "text": text[:3000], "url": url}
     except Exception as e:
         logger.warning("Tool fetch_government_document failed for %s: %s", url, e)
         return {"success": False, "error": str(e), "url": url}
@@ -126,12 +127,17 @@ async def retrieve_relevant_passages(
         n_results: Max passages to return.
         
     Returns:
-        Dict with list of matching text passages and confidence scores.
+        Dict with list of matching text passages and raw vector distances.
     """
     logger.info("Tool: retrieve_relevant_passages query='%s', document_id='%s'", query, document_id)
     target_col = document_id if document_id else "general_schemes"
     try:
-        passages = search_collection(collection_name=target_col, query=query, n_results=n_results)
+        passages = await run_in_threadpool(
+            search_collection,
+            collection_name=target_col,
+            query=query,
+            n_results=n_results,
+        )
         return {
             "success": True,
             "passages": passages,
@@ -163,71 +169,185 @@ async def analyze_scheme_eligibility(
     missing: List[str] = []
 
     criteria_list = scheme_data.get("eligibility_criteria", [])
-    scheme_name = scheme_data.get("name", "the scheme")
+    criteria_text = " ".join(criteria_list)
+    criteria_lower = criteria_text.casefold()
+    additional = user_profile.get("additional_info") or {}
+    if not isinstance(additional, dict):
+        additional = {}
+    checked_criteria = 0
 
-    # 1. State check
     scheme_state = scheme_data.get("state")
     user_state = user_profile.get("state")
     if scheme_state:
-        if user_state:
-            if scheme_state.lower() in user_state.lower() or user_state.lower() in scheme_state.lower():
-                satisfied.append(f"Resident of {scheme_state} (Matches your profile)")
-            else:
-                unsatisfied.append(f"Restricted to residents of {scheme_state} (Your state: {user_state})")
+        checked_criteria += 1
+        if not user_state:
+            missing.append(f"State of residence (Scheme is restricted to {scheme_state})")
+        elif " ".join(scheme_state.casefold().split()) == " ".join(user_state.casefold().split()):
+            satisfied.append(f"Resident of {scheme_state}")
         else:
-            missing.append(f"Requires residence in {scheme_state} (Please confirm your state of residence)")
+            unsatisfied.append(f"Restricted to residents of {scheme_state} (Your state: {user_state})")
 
-    # 2. Age checks
     user_age = user_profile.get("age")
-    scheme_desc_and_crit = " ".join(criteria_list) + " " + scheme_data.get("description", "")
-    
-    # Check for senior citizen criteria
-    if "70" in scheme_desc_and_crit and ("senior" in scheme_desc_and_crit.lower() or "age" in scheme_desc_and_crit.lower()):
-        if user_age is not None:
-            if user_age >= 70:
-                satisfied.append(f"Age criterion: 70+ years (Your age: {user_age})")
-            else:
-                unsatisfied.append(f"Age criterion: Must be 70 years or older (Your age: {user_age})")
+    if "70" in criteria_text and any(word in criteria_lower for word in ("senior", "age", "years")):
+        checked_criteria += 1
+        if user_age is None:
+            missing.append("Age (Required to verify the 70+ years criterion)")
+        elif user_age >= 70:
+            satisfied.append(f"Age criterion met (reported age: {user_age})")
         else:
-            missing.append("Age (Required to verify if you are 70+ years)")
+            unsatisfied.append(f"Must be 70 years or older (reported age: {user_age})")
+    elif re.search(r"18\s*(?:-|to|and)\s*40", criteria_lower):
+        checked_criteria += 1
+        if user_age is None:
+            missing.append("Age (Required to verify the 18–40 years criterion)")
+        elif 18 <= user_age <= 40:
+            satisfied.append(f"Age criterion met (reported age: {user_age})")
+        else:
+            unsatisfied.append(f"Must be between 18 and 40 years (reported age: {user_age})")
+    elif "minimum age of 18" in criteria_lower:
+        checked_criteria += 1
+        if user_age is None:
+            missing.append("Age (Required to verify the minimum age criterion)")
+        elif user_age >= 18:
+            satisfied.append(f"Minimum age criterion met (reported age: {user_age})")
+        else:
+            unsatisfied.append(f"Must be at least 18 years old (reported age: {user_age})")
 
-    # Check for general working age (18-40 e.g. APY or Vishwakarma)
-    if "18 and 40" in scheme_desc_and_crit or "18-40" in scheme_desc_and_crit:
-        if user_age is not None:
-            if 18 <= user_age <= 40:
-                satisfied.append(f"Age between 18 and 40 years (Your age: {user_age})")
+    if "income" in criteria_lower or "bpl" in criteria_lower:
+        checked_criteria += 1
+        bpl_value = additional.get("is_bpl")
+        if "bpl" in criteria_lower and isinstance(bpl_value, bool):
+            if bpl_value:
+                satisfied.append("BPL status was reported by the applicant; official certificate verification is still required")
             else:
-                unsatisfied.append(f"Must be between 18 and 40 years old (Your age: {user_age})")
+                unsatisfied.append("The scheme's stated BPL condition is not met based on the supplied profile")
+        amount_match = re.search(r"(?:₹|rs\.?\s*)\s*([\d,]+(?:\.\d+)?)\s*(lakh|lakhs|lac|crore)?", criteria_lower)
+        lakh_match = re.search(r"([\d,.]+)\s*(?:lakh|lakhs|lac)\b", criteria_lower)
+        threshold = None
+        if amount_match:
+            threshold = float(amount_match.group(1).replace(",", ""))
+            if amount_match.group(2) in {"lakh", "lakhs", "lac"}:
+                threshold *= 100_000
+            elif amount_match.group(2) == "crore":
+                threshold *= 10_000_000
+        elif lakh_match:
+            threshold = float(lakh_match.group(1).replace(",", "")) * 100_000
+        if threshold is None and "bpl" in criteria_lower and isinstance(bpl_value, bool):
+            pass
+        elif threshold is None or not any(word in criteria_lower for word in ("below", "less than", "not exceed", "up to", "upto", "within", "maximum")):
+            missing.append("The income threshold requires confirmation from the official scheme criteria")
+        elif user_profile.get("annual_income") is None:
+            missing.append(f"Annual household income (To verify the stated ₹{threshold:,.0f} limit)")
+        elif user_profile["annual_income"] <= threshold:
+            satisfied.append(f"Reported income is within the stated ₹{threshold:,.0f} limit")
         else:
-            missing.append("Age (Must be between 18 and 40 years)")
-    elif "minimum age of 18" in scheme_desc_and_crit.lower() or "18 years" in scheme_desc_and_crit.lower():
-        if user_age is not None:
-            if user_age >= 18:
-                satisfied.append(f"Minimum age 18 years (Your age: {user_age})")
-            else:
-                unsatisfied.append(f"Minimum age requirement is 18 years (Your age: {user_age})")
-        else:
-            missing.append("Age (Must be at least 18 years old)")
+            unsatisfied.append(f"Reported income exceeds the stated ₹{threshold:,.0f} limit")
 
-    # 3. Income check
-    user_income = user_profile.get("annual_income")
-    if "income" in scheme_desc_and_crit.lower() or "bpl" in scheme_desc_and_crit.lower():
-        if user_income is not None:
-            if user_income <= 250000:
-                satisfied.append(f"Low-income / BPL eligibility (Reported income: ₹{user_income:,.0f}/year)")
-            else:
-                unsatisfied.append(f"Income threshold might be exceeded (Reported income: ₹{user_income:,.0f}/year)")
-        else:
-            missing.append("Annual household income (To verify low-income / BPL status)")
-
-    # 4. Occupation / Beneficiary check
-    user_occ = user_profile.get("occupation", "").lower()
-    beneficiaries = [b.lower() for b in scheme_data.get("beneficiary_types", [])]
-    if beneficiaries and user_occ:
-        if any(user_occ in b or b in user_occ for b in beneficiaries):
+    beneficiaries = scheme_data.get("beneficiary_types", [])
+    if beneficiaries:
+        checked_criteria += 1
+        user_occ = (user_profile.get("occupation") or "").casefold().strip()
+        if not user_occ:
+            missing.append(f"Occupation or beneficiary category (Scheme lists: {', '.join(beneficiaries)})")
+        elif any(user_occ in b.casefold() or b.casefold() in user_occ for b in beneficiaries):
             satisfied.append(f"Beneficiary category matched: {user_profile.get('occupation')}")
         else:
-            missing.append(f"Targeted to {', '.join(scheme_data.get('beneficiary_types', []))} (Your occupation: {user_profile.get('occupation')})")
+            unsatisfied.append(f"Occupation '{user_profile.get('occupation')}' does not match the listed beneficiary groups")
+
+    if any(word in criteria_lower for word in ("student", "enrolled", "studying")):
+        checked_criteria += 1
+        student_status = user_profile.get("is_student")
+        if student_status is None and (user_profile.get("occupation") or "").casefold() == "student":
+            student_status = True
+        if student_status is None:
+            missing.append("Current school, college, or training enrollment status")
+        elif student_status:
+            satisfied.append("Current student status was reported; enrollment documents require verification")
+        else:
+            unsatisfied.append("The scheme requires current student or enrollment status")
+
+    if any(word in criteria_lower for word in ("women", "woman", "female", "girl child")):
+        checked_criteria += 1
+        gender = (user_profile.get("gender") or "").casefold()
+        if not gender or gender == "prefer not to say":
+            missing.append("Gender or beneficiary-category information required by this scheme")
+        elif gender in {"female", "woman", "girl"}:
+            satisfied.append("Reported gender matches the stated women/girl beneficiary group")
+        else:
+            unsatisfied.append("The scheme is restricted to women/girl beneficiaries")
+
+    if any(word in criteria_lower for word in ("landholding", "land holding", "cultivable land", "agricultural land")):
+        checked_criteria += 1
+        acres = additional.get("land_holding_acres")
+        if acres is None:
+            missing.append("Agricultural land ownership or landholding information")
+        else:
+            try:
+                if float(acres) > 0:
+                    satisfied.append("Reported agricultural landholding; ownership and scheme thresholds require official verification")
+                else:
+                    unsatisfied.append("No agricultural landholding was reported")
+            except (TypeError, ValueError):
+                missing.append("Valid agricultural landholding information")
+
+    if any(word in criteria_lower for word in ("udyam", "msme registration", "business registration")):
+        checked_criteria += 1
+        registration = additional.get("has_business_reg")
+        if not isinstance(registration, bool):
+            missing.append("Current Udyam/MSME or business registration status")
+        elif registration:
+            satisfied.append("Business registration was reported; certificate verification is still required")
+        else:
+            unsatisfied.append("The scheme requires business registration")
+
+    category_rules = {
+        "scheduled caste": "sc",
+        "scheduled tribe": "st",
+        "sc/st": "sc/st",
+        "obc": "obc",
+    }
+    required_categories = {category for keyword, category in category_rules.items() if keyword in criteria_lower}
+    if required_categories:
+        checked_criteria += 1
+        user_category = (user_profile.get("category") or "").casefold().replace(" ", "")
+        if not user_category:
+            missing.append("Social-category information required by the scheme")
+        elif "sc/st" in required_categories:
+            if user_category in {"sc", "st", "scheduledcaste", "scheduledtribe"}:
+                satisfied.append("Reported social category matches one of the scheme's listed groups")
+            else:
+                unsatisfied.append("The scheme is restricted to SC/ST beneficiaries")
+        elif user_category not in required_categories:
+            unsatisfied.append(f"Reported social category does not match the scheme's required group ({', '.join(sorted(required_categories))})")
+        else:
+            satisfied.append("Reported social category matches a listed group; certificate verification is required")
+
+    if "unemployed" in criteria_lower or "not employed" in criteria_lower:
+        checked_criteria += 1
+        employment_status = user_profile.get("is_employed")
+        if employment_status is None:
+            missing.append("Current employment status")
+        elif employment_status:
+            unsatisfied.append("The scheme requires the applicant to be unemployed")
+        else:
+            satisfied.append("Reported employment status matches the stated unemployed group")
+
+    if "disabil" in criteria_lower:
+        checked_criteria += 1
+        disability_status = additional.get("has_disability")
+        if not isinstance(disability_status, bool):
+            missing.append("Disability status and any required official certification")
+        elif disability_status:
+            satisfied.append("Disability was reported; official certification and any percentage threshold require verification")
+        else:
+            unsatisfied.append("The scheme requires a person with a disability")
+
+    if not criteria_list:
+        missing.append("No detailed eligibility criteria are available for this scheme")
+    elif checked_criteria == 0:
+        missing.append("The scheme's eligibility rules need review against the official criteria")
+    elif not unsatisfied:
+        missing.append("Confirm that all scheme-specific conditions are met with the responsible department")
 
     # Determine status
     if unsatisfied:
@@ -240,12 +360,10 @@ async def analyze_scheme_eligibility(
         status = "likely_eligible"
 
     # Default application steps and documents
-    req_docs = scheme_data.get("required_documents", ["Aadhaar Card", "Bank Account Details", "Proof of Residence"])
+    req_docs = scheme_data.get("required_documents", [])
     app_steps = [
-        f"1. Visit the official portal: {scheme_data.get('official_url', 'myscheme.gov.in')}",
-        "2. Complete online registration using Aadhaar and mobile OTP authentication.",
-        f"3. Upload the required documents: {', '.join(req_docs[:3])}.",
-        "4. Submit your application and keep the generated acknowledgment number for status tracking."
+        f"1. Review the current instructions at the official scheme page: {scheme_data.get('official_url', 'https://www.myscheme.gov.in')}.",
+        "2. Confirm the current eligibility rules, required documents, and application process with the responsible department before applying.",
     ]
 
     return {
@@ -277,28 +395,3 @@ async def generate_voice_response(text: str, language: str) -> Dict[str, Any]:
     except Exception as e:
         logger.warning("Voice synthesis failed: %s", e)
         return {"success": False, "audio_url": None, "error": str(e)}
-
-
-async def verify_source_and_citations(claims: List[str], sources: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Verify that specific claims are supported by the provided sources."""
-    verified_claims = []
-    unverified_claims = []
-
-    source_text = " ".join([
-        (s.get("description", "") + " " + " ".join(s.get("benefits", [])) + " " + " ".join(s.get("eligibility_criteria", [])))
-        for s in sources
-    ]).lower()
-
-    for claim in claims:
-        # Check keyword overlap
-        words = [w.lower() for w in claim.split() if len(w) > 3]
-        if words and sum(1 for w in words if w in source_text) >= len(words) * 0.4:
-            verified_claims.append(claim)
-        else:
-            unverified_claims.append(claim)
-
-    return {
-        "verified_claims": verified_claims,
-        "unverified_claims": unverified_claims,
-        "confidence_score": round(len(verified_claims) / max(len(claims), 1), 2)
-    }

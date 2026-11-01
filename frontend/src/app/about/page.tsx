@@ -24,38 +24,30 @@ import {
 import Link from "next/link";
 
 export default function AboutPage() {
-  const verifiedSources = [
+  const governmentPortals = [
     {
       name: "myScheme Portal",
       authority: "Ministry of Electronics and Information Technology (MeitY)",
       url: "https://www.myscheme.gov.in",
       dataType: "Central & State Welfare Scheme metadata, criteria, and benefits",
-      frequency: "Daily automated synchronization",
-      coverage: "500+ National & State schemes",
     },
     {
       name: "National Portal of India",
       authority: "National Informatics Centre (NIC)",
       url: "https://www.india.gov.in",
-      dataType: "Official circulars, citizen service portals, ministry directories",
-      frequency: "Weekly index verification",
-      coverage: "All Central Ministries & State Secretariats",
+      dataType: "Information and service directory",
     },
     {
       name: "Open Government Data (OGD) Platform",
       authority: "Government of India",
       url: "https://data.gov.in",
-      dataType: "Public sector datasets, budget allocations, census profiles",
-      frequency: "Monthly policy metrics",
-      coverage: "Nationwide demographic & scheme disbursement records",
+      dataType: "Public datasets",
     },
     {
       name: "PM-KISAN & DBT Bharat Portals",
       authority: "Ministry of Agriculture & Farmers Welfare / DBT Mission",
       url: "https://dbtbharat.gov.in",
-      dataType: "Direct Benefit Transfer rules and Aadhaar mapping protocols",
-      frequency: "Real-time verification",
-      coverage: "Farmer and rural subsidy benefit pipelines",
+      dataType: "Scheme information and services",
     },
   ];
 
@@ -65,7 +57,7 @@ export default function AboutPage() {
     { name: "Tailwind CSS & shadcn/ui", desc: "Accessible, responsive civic design system", category: "Styling" },
     { name: "FastAPI & Python", desc: "High-performance RAG backend service", category: "Backend" },
     { name: "Web Speech API", desc: "In-browser multilingual Speech-to-Text", category: "Voice" },
-    { name: "LangChain / LLM Agent", desc: "Knowledge retrieval and source citation verification", category: "AI & RAG" },
+    { name: "LangChain / LLM Agent", desc: "Knowledge retrieval and source citation formatting", category: "AI & RAG" },
   ];
 
   return (
@@ -112,31 +104,33 @@ export default function AboutPage() {
           <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
             JanSahayak AI was built to ensure that no citizen in India is left
             behind due to digital or linguistic literacy divides. By combining
-            modern AI language models with strict retrieval from official
-            government documents, we provide instant, verified, and plain-language
-            guidance in English, Hindi, and Telugu.
+            language models with available scheme references, curated records,
+            and user-provided documents, we provide plain-language guidance in
+            English, Hindi, and Telugu. Always confirm current rules with the
+            responsible government department.
           </p>
         </div>
       </div>
 
-      {/* Official Government Sources Registry */}
+      {/* Government portal directory */}
       <div className="space-y-6">
         <div className="border-b border-slate-200 pb-4">
           <div className="flex items-center gap-2 text-indigo-700 font-bold text-xs uppercase tracking-wider mb-1">
             <ShieldCheck className="w-4 h-4" />
-            <span>Integrity & Verification</span>
+            <span>Further checking</span>
           </div>
           <h2 className="text-2xl font-bold text-navy-950 tracking-tight">
-            Official Data Sources Registry
+            Government Portal Directory
           </h2>
           <p className="text-xs sm:text-sm text-slate-600 mt-1">
-            All facts, criteria, and benefits displayed in JanSahayak AI are
-            retrieved directly from authorized Indian government sources.
+            These links point to government portals, but a portal may not be
+            queried for every answer. Scheme results can include curated
+            references, and uploaded documents are user-provided and unverified.
           </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          {verifiedSources.map((source, idx) => (
+          {governmentPortals.map((source, idx) => (
             <Card key={idx} className="border-slate-200 bg-white shadow-xs">
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
@@ -161,9 +155,8 @@ export default function AboutPage() {
                   <span className="font-semibold text-navy-900">Data Type: </span>
                   {source.dataType}
                 </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-100">
-                  <span>Frequency: {source.frequency}</span>
-                  <span className="font-semibold text-emerald-700">● {source.coverage}</span>
+                <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-100">
+                  Portal directory link; current content should be checked on the site.
                 </div>
               </CardContent>
             </Card>

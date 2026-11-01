@@ -1,6 +1,12 @@
 @echo off
-set PYTHON=C:\Users\kanak\AppData\Local\Programs\Python\Python314\python.exe
-cd /d "C:\Users\kanak\.gemini\antigravity\scratch\jansahayak-ai\backend"
+set ROOT=%~dp0..
+set VENV_PYTHON=%ROOT%\.venv\Scripts\python.exe
+if not exist "%VENV_PYTHON%" (
+    python -m venv "%ROOT%\.venv"
+    if errorlevel 1 exit /b 1
+)
+set PYTHON=%VENV_PYTHON%
+cd /d "%~dp0"
 
 echo ======================================================
 echo    JanSahayak AI -- Backend Launcher

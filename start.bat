@@ -8,7 +8,12 @@ echo.
 set ROOT=%~dp0
 set BACKEND=%ROOT%backend
 set FRONTEND=%ROOT%frontend
-set PYTHON=C:\Users\kanak\AppData\Local\Programs\Python\Python314\python.exe
+set PYTHON=%ROOT%\.venv\Scripts\python.exe
+
+if not exist "%PYTHON%" (
+    python -m venv "%ROOT%\.venv"
+    if errorlevel 1 exit /b 1
+)
 
 echo Checking environment...
 
@@ -17,6 +22,18 @@ if not exist "%BACKEND%\.env" (
     copy "%BACKEND%\.env.example" "%BACKEND%\.env"
     echo Please edit backend\.env and add your OPENAI_API_KEY
     pause
+)
+
+echo Installing backend dependencies...
+"%PYTHON%" -m pip install -r "%BACKEND%\requirements.txt"
+if errorlevel 1 exit /b 1
+
+if not exist "%FRONTEND%\node_modules" (
+    echo Installing frontend dependencies...
+    pushd "%FRONTEND%"
+    npm install --legacy-peer-deps
+    if errorlevel 1 (popd & exit /b 1)
+    popd
 )
 
 echo.

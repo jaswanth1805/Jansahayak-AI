@@ -102,7 +102,7 @@ export default function AssistantPage() {
   // When speech transcript completes, if listening stops, allow user to send
   const handleVoiceSend = () => {
     if (transcript.trim()) {
-      sendMessage(transcript.trim(), language, undefined, uploadedDoc?.document_id);
+      sendMessage(transcript.trim(), language, undefined, uploadedDoc?.document_id, uploadedDoc?.access_token);
       stopListening();
       resetTranscript();
       setVoiceModalOpen(false);
@@ -134,7 +134,8 @@ export default function AssistantPage() {
         `I have uploaded document: "${response.filename}". Can you summarize the key benefits and who is eligible?`,
         language,
         undefined,
-        response.document_id
+        response.document_id,
+        response.access_token
       );
     } catch (err: unknown) {
       console.error("Document upload error:", err);
@@ -260,7 +261,7 @@ export default function AssistantPage() {
                   key={i}
                   disabled={isLoading}
                   onClick={() => {
-                    sendMessage(q, language, undefined, uploadedDoc?.document_id);
+                    sendMessage(q, language, undefined, uploadedDoc?.document_id, uploadedDoc?.access_token);
                     if (window.innerWidth < 768) setSidebarOpen(false);
                   }}
                   className="w-full text-left text-xs p-2 rounded-lg border border-slate-100 bg-slate-50/60 hover:bg-navy-50 hover:border-navy-200 text-slate-700 transition font-normal active:scale-[0.99] disabled:opacity-50"
@@ -352,7 +353,7 @@ export default function AssistantPage() {
             <ChatMessage
               key={index}
               message={msg}
-              onSelectSuggestion={(s) => sendMessage(s, language, undefined, uploadedDoc?.document_id)}
+              onSelectSuggestion={(s) => sendMessage(s, language, undefined, uploadedDoc?.document_id, uploadedDoc?.access_token)}
               onPlayAudio={(url, text, lang) => playAudio(url, text, lang)}
               isPlayingAudio={isPlaying}
             />
@@ -370,7 +371,7 @@ export default function AssistantPage() {
             <div className="flex items-center gap-3 p-4 rounded-xl bg-white border border-slate-200 shadow-xs max-w-sm">
               <Loader2 className="h-5 w-5 text-navy-700 animate-spin" />
               <span className="text-xs font-medium text-slate-600">
-                Searching verified government repositories...
+                Searching available scheme and policy references...
               </span>
             </div>
           )}
@@ -402,7 +403,7 @@ export default function AssistantPage() {
           <div className="max-w-4xl mx-auto">
             <ChatInput
               onSendMessage={(text) =>
-                sendMessage(text, language, undefined, uploadedDoc?.document_id)
+                sendMessage(text, language, undefined, uploadedDoc?.document_id, uploadedDoc?.access_token)
               }
               isLoading={isLoading}
               onOpenVoiceModal={() => setVoiceModalOpen(true)}

@@ -22,20 +22,26 @@ export interface ExtendedChatMessage extends ChatMessage {
 const STORAGE_SESSION_KEY = "jansahayak_chat_session_id";
 const STORAGE_MESSAGES_KEY = "jansahayak_chat_messages";
 
+function createSessionId(): string {
+  const bytes = new Uint8Array(16);
+  window.crypto.getRandomValues(bytes);
+  return `sess_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
 export function useChat(initialLanguage: Language = "en") {
   const [messages, setMessages] = useState<ExtendedChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string>("");
   const [agentSteps, setAgentSteps] = useState<string[]>([]);
-  const lastUserPromptRef = useRef<{ text: string; language: Language } | null>(null);
+  const lastUserPromptRef = useRef<{ text: string; language: Language; documentId?: string; documentAccessToken?: string; userProfile?: Record<string, unknown> } | null>(null);
 
   // Initialize session ID and restore cached messages if available
   useEffect(() => {
     if (typeof window !== "undefined") {
       let currentSession = localStorage.getItem(STORAGE_SESSION_KEY);
-      if (!currentSession) {
-        currentSession = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      if (!currentSession || !/^sess_[0-9a-f]{32}$/.test(currentSession)) {
+        currentSession = createSessionId();
         localStorage.setItem(STORAGE_SESSION_KEY, currentSession);
       }
       setSessionId(currentSession);
@@ -45,7 +51,7 @@ export function useChat(initialLanguage: Language = "en") {
         try {
           const parsed = JSON.parse(cached);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            setMessages(parsed);
+            setMessages(parsed.slice(-200));
           }
         } catch (e) {
           console.warn("Failed to parse cached chat messages", e);
@@ -70,13 +76,14 @@ export function useChat(initialLanguage: Language = "en") {
       text: string,
       language: Language = initialLanguage,
       userProfile?: Record<string, unknown>,
-      documentId?: string
+      documentId?: string,
+      documentAccessToken?: string
     ) => {
       const trimmed = text.trim();
       if (!trimmed || isLoading) return;
 
       setError(null);
-      lastUserPromptRef.current = { text: trimmed, language };
+      lastUserPromptRef.current = { text: trimmed, language, documentId, documentAccessToken, userProfile };
 
       const userMessage: ExtendedChatMessage = {
         role: "user",
@@ -84,11 +91,11 @@ export function useChat(initialLanguage: Language = "en") {
         timestamp: new Date().toISOString(),
       };
 
-      setMessages((prev) => [...prev, userMessage]);
+      setMessages((prev) => [...prev, userMessage].slice(-200));
       setIsLoading(true);
       setAgentSteps([
         "Analyzing request and identifying user intent...",
-        "Searching relevant official schemes & policies...",
+        "Searching available scheme and policy references...",
       ]);
 
       try {
@@ -96,9 +103,10 @@ export function useChat(initialLanguage: Language = "en") {
         if (documentId) {
           setAgentSteps((prev) => [
             ...prev,
-            "Scanning document clauses and retrieving verified citations...",
+            "Searching the uploaded document and collecting page references...",
           ]);
-          const docRes = await api.queryDocument(documentId, trimmed, language);
+          if (!documentAccessToken) throw new Error("This document is not authorized for querying. Upload it again to continue.");
+          const docRes = await api.queryDocument(documentId, documentAccessToken, trimmed, language);
 
           const assistantMsg: ExtendedChatMessage = {
             role: "assistant",
@@ -107,12 +115,12 @@ export function useChat(initialLanguage: Language = "en") {
             agent_steps: [
               "Indexed document successfully",
               "Matched user query against document sections",
-              "Extracted verified clauses",
+              "Collected matching passages from the uploaded document",
             ],
             timestamp: new Date().toISOString(),
           };
 
-          setMessages((prev) => [...prev, assistantMsg]);
+          setMessages((prev) => [...prev, assistantMsg].slice(-200));
           setAgentSteps([]);
           setIsLoading(false);
           return;
@@ -120,7 +128,7 @@ export function useChat(initialLanguage: Language = "en") {
 
         // Standard chat conversation
         // Filter history to conform to backend ChatMessage schema (role & content)
-        const historyForApi: ChatMessage[] = messages.map((m) => ({
+        const historyForApi: ChatMessage[] = messages.slice(-30).map((m) => ({
           role: m.role,
           content: m.content,
         }));
@@ -128,14 +136,17 @@ export function useChat(initialLanguage: Language = "en") {
         setAgentSteps((prev) => [
           ...prev,
           "Querying Government Knowledge Base (myscheme.gov.in & datasets)...",
-          "Synthesizing response with verified eligibility & source links...",
+          "Preparing a response from available evidence and source links...",
         ]);
 
         const response: ChatResponse = await api.chat(
           trimmed,
           language,
           historyForApi,
-          sessionId
+          sessionId,
+          undefined,
+          undefined,
+          userProfile
         );
 
         if (response.session_id && response.session_id !== sessionId) {
@@ -157,7 +168,7 @@ export function useChat(initialLanguage: Language = "en") {
           timestamp: new Date().toISOString(),
         };
 
-        setMessages((prev) => [...prev, assistantMsg]);
+        setMessages((prev) => [...prev, assistantMsg].slice(-200));
         setAgentSteps([]);
       } catch (err: unknown) {
         console.error("Chat error:", err);
@@ -173,7 +184,7 @@ export function useChat(initialLanguage: Language = "en") {
           content: `⚠️ We encountered an issue contacting the JanSahayak AI service: "${errMsg}". \n\nPlease make sure the backend server is running on http://localhost:8000 and try again.`,
           timestamp: new Date().toISOString(),
         };
-        setMessages((prev) => [...prev, fallbackMsg]);
+        setMessages((prev) => [...prev, fallbackMsg].slice(-200));
       } finally {
         setIsLoading(false);
       }
@@ -183,7 +194,7 @@ export function useChat(initialLanguage: Language = "en") {
 
   const retryLastMessage = useCallback(async () => {
     if (!lastUserPromptRef.current) return;
-    const { text, language } = lastUserPromptRef.current;
+      const { text, language, documentId, documentAccessToken, userProfile } = lastUserPromptRef.current;
     // Remove last message if it was the error fallback
     setMessages((prev) => {
       if (prev.length > 0 && prev[prev.length - 1].role === "assistant") {
@@ -191,20 +202,25 @@ export function useChat(initialLanguage: Language = "en") {
       }
       return prev;
     });
-    await sendMessage(text, language);
+    await sendMessage(text, language, userProfile, documentId, documentAccessToken);
   }, [sendMessage]);
 
   const clearHistory = useCallback(() => {
+    if (sessionId) {
+      void api.deleteChatSession(sessionId).catch((err) => {
+        console.warn("Could not clear server-side chat history", err);
+      });
+    }
     setMessages([]);
     setError(null);
     setAgentSteps([]);
     if (typeof window !== "undefined") {
       localStorage.removeItem(STORAGE_MESSAGES_KEY);
-      const newSession = `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      const newSession = createSessionId();
       localStorage.setItem(STORAGE_SESSION_KEY, newSession);
       setSessionId(newSession);
     }
-  }, []);
+  }, [sessionId]);
 
   return {
     messages,

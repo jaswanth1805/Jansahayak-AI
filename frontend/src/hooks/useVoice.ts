@@ -42,6 +42,14 @@ export function useVoice(language: Language = "en") {
 
   const recognitionRef = useRef<ISpeechRecognition | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const playbackIdRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   // Map language code to standard SpeechRecognition BCP-47 tag
   const getSpeechLang = useCallback((lang: Language): string => {
@@ -70,6 +78,7 @@ export function useVoice(language: Language = "en") {
         recognition.lang = getSpeechLang(language);
 
         recognition.onresult = (event: SpeechRecognitionEvent) => {
+          if (!mountedRef.current) return;
           let currentTranscript = "";
           for (let i = event.resultIndex; i < event.results.length; i++) {
             currentTranscript += event.results[i][0].transcript;
@@ -78,6 +87,7 @@ export function useVoice(language: Language = "en") {
         };
 
         recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+          if (!mountedRef.current) return;
           console.warn("Speech recognition error:", event.error);
           setIsListening(false);
           if (event.error === "not-allowed") {
@@ -90,7 +100,7 @@ export function useVoice(language: Language = "en") {
         };
 
         recognition.onend = () => {
-          setIsListening(false);
+          if (mountedRef.current) setIsListening(false);
         };
 
         recognitionRef.current = recognition;
@@ -109,8 +119,13 @@ export function useVoice(language: Language = "en") {
       }
       if (audioRef.current) {
         audioRef.current.pause();
+        audioRef.current.src = "";
         audioRef.current = null;
       }
+      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+      playbackIdRef.current += 1;
+      utteranceRef.current = null;
+      if (mountedRef.current) setIsPlaying(false);
     };
   }, [language, getSpeechLang]);
 
@@ -161,22 +176,28 @@ export function useVoice(language: Language = "en") {
   }, []);
 
   const stopAudio = useCallback(() => {
+    playbackIdRef.current += 1;
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
-      setIsPlaying(false);
+      audioRef.current.src = "";
+      audioRef.current = null;
     }
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    utteranceRef.current = null;
+    if (mountedRef.current) setIsPlaying(false);
   }, []);
 
   const playAudio = useCallback(
     async (url: string, fallbackText?: string, langCode: Language = language) => {
       stopAudio();
       if (!url && !fallbackText) return;
+      const playbackId = playbackIdRef.current;
 
       const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
-      const fullUrl = url
-        ? (url.startsWith("http") ? url : `${BACKEND_URL}${url}`)
-        : "";
+      const fullUrl = url?.startsWith("/api/voice/audio/") ? `${BACKEND_URL}${url}` : "";
 
       const speakBrowserFallback = () => {
         if (typeof window !== "undefined" && "speechSynthesis" in window && fallbackText) {
@@ -191,15 +212,31 @@ export function useVoice(language: Language = "en") {
               .replace(/\s+/g, " ")
               .trim();
             const utterance = new SpeechSynthesisUtterance(clean.slice(0, 800));
+            utteranceRef.current = utterance;
             utterance.lang = getSpeechLang(langCode);
+            utterance.onstart = () => {
+              if (playbackId === playbackIdRef.current) setIsPlaying(true);
+            };
+            utterance.onend = () => {
+              if (playbackId === playbackIdRef.current) {
+                utteranceRef.current = null;
+                setIsPlaying(false);
+              }
+            };
+            utterance.onerror = () => {
+              if (playbackId === playbackIdRef.current) {
+                utteranceRef.current = null;
+                setIsPlaying(false);
+              }
+            };
             window.speechSynthesis.resume();
             window.speechSynthesis.speak(utterance);
           } catch (e) {
             console.error("Browser speech synthesis error:", e);
-            setIsPlaying(false);
+            if (playbackId === playbackIdRef.current) setIsPlaying(false);
           }
         } else {
-          setIsPlaying(false);
+          if (playbackId === playbackIdRef.current) setIsPlaying(false);
         }
       };
 
@@ -215,10 +252,11 @@ export function useVoice(language: Language = "en") {
         setIsPlaying(true);
 
         audio.onended = () => {
-          setIsPlaying(false);
+          if (playbackId === playbackIdRef.current) setIsPlaying(false);
         };
 
         audio.onerror = (e) => {
+          if (playbackId !== playbackIdRef.current) return;
           console.warn("Audio file playback error, falling back to browser SpeechSynthesis:", e);
           speakBrowserFallback();
         };
@@ -226,6 +264,7 @@ export function useVoice(language: Language = "en") {
         const playPromise = audio.play();
         if (playPromise !== undefined) {
           playPromise.catch((err) => {
+            if (playbackId !== playbackIdRef.current) return;
             console.warn("audio.play() error or blocked by browser policy, using SpeechSynthesis:", err);
             speakBrowserFallback();
           });
@@ -249,18 +288,21 @@ export function useVoice(language: Language = "en") {
         console.error("Speech synthesis failed:", err);
         // Fallback to browser Web Speech API SpeechSynthesis if available
         if (typeof window !== "undefined" && "speechSynthesis" in window) {
+          stopAudio();
+          const playbackId = playbackIdRef.current;
           const utterance = new SpeechSynthesisUtterance(text);
+          utteranceRef.current = utterance;
           utterance.lang = getSpeechLang(lang);
-          utterance.onstart = () => setIsPlaying(true);
-          utterance.onend = () => setIsPlaying(false);
-          utterance.onerror = () => setIsPlaying(false);
+          utterance.onstart = () => { if (playbackId === playbackIdRef.current) setIsPlaying(true); };
+          utterance.onend = () => { if (playbackId === playbackIdRef.current) { utteranceRef.current = null; setIsPlaying(false); } };
+          utterance.onerror = () => { if (playbackId === playbackIdRef.current) { utteranceRef.current = null; setIsPlaying(false); } };
           window.speechSynthesis.speak(utterance);
         } else {
           setError("Text-to-speech could not be played.");
         }
       }
     },
-    [language, getSpeechLang, playAudio]
+    [language, getSpeechLang, playAudio, stopAudio]
   );
 
   return {

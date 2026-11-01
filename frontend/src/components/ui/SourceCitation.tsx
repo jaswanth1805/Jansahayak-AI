@@ -3,7 +3,7 @@
 import React from "react";
 import { SourceCitation as CitationType } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
-import { ExternalLink, CheckCircle, ShieldCheck, Clock, FileText } from "lucide-react";
+import { ExternalLink, ShieldCheck, Clock, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface SourceCitationProps {
@@ -12,6 +12,12 @@ interface SourceCitationProps {
 }
 
 export function SourceCitation({ citation, className }: SourceCitationProps) {
+  const sourceLabels: Record<string, string> = {
+    official_api: "Official API",
+    official_website: "Official website",
+    curated_reference: "Curated reference",
+    uploaded_document: "User-uploaded document",
+  };
   const formattedDate = citation.retrieved_at
     ? new Date(citation.retrieved_at).toLocaleDateString(undefined, {
         month: "short",
@@ -33,7 +39,7 @@ export function SourceCitation({ citation, className }: SourceCitationProps) {
             variant="navy"
             className="text-[10px] uppercase tracking-wider py-0 px-2"
           >
-            {citation.source_type || "Official Source"}
+            {sourceLabels[citation.source_type] || "Source"}
           </Badge>
 
           {citation.is_verified ? (
@@ -42,11 +48,11 @@ export function SourceCitation({ citation, className }: SourceCitationProps) {
               className="flex items-center gap-1 text-[10px] py-0 px-1.5"
             >
               <ShieldCheck className="h-3 w-3" />
-              Verified
+              Official domain
             </Badge>
           ) : (
             <Badge variant="secondary" className="text-[10px] py-0 px-1.5">
-              Unverified
+              Not independently checked
             </Badge>
           )}
 
@@ -105,8 +111,8 @@ export function SourceCitationList({
   return (
     <div className={cn("space-y-2 mt-3", className)}>
       <div className="flex items-center gap-1.5 text-xs font-semibold text-navy-800">
-        <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-        <span>Official Government Sources & Citations ({citations.length})</span>
+        <ShieldCheck className="h-3.5 w-3.5 text-slate-500" />
+        <span>Sources and citations ({citations.length})</span>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
         {citations.map((c, i) => (

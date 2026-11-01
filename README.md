@@ -16,12 +16,12 @@ Millions of Indian citizens are unaware of or unable to access government scheme
 
 | Feature | Description |
 |---------|-------------|
-| 🤖 **AI Document Understanding** | Upload government PDFs, ask questions, get simple explanations with page-level citations |
-| 🔍 **Live Scheme Discovery** | Real-time scheme data from MyScheme.gov.in, India.gov.in, Data.gov.in |
-| ✅ **Eligibility Assessment** | Personalized eligibility checking against official criteria |
+| 🤖 **AI Document Understanding** | Upload PDFs, ask questions, get plain-language explanations with page references |
+| 🔍 **Scheme Discovery** | Search MyScheme.gov.in and India.gov.in alongside a clearly labeled curated reference list |
+| ✅ **Eligibility Assessment** | Preliminary profile-based guidance; confirm final eligibility with the responsible department |
 | 🌐 **Multilingual AI Assistant** | Chat in English, Hindi, or Telugu |
 | 🎙️ **Voice Assistance** | Ask questions by voice, hear answers in your language |
-| 📌 **Source Verification** | Every answer backed by official sources with citations |
+| 📌 **Source References** | Answers include available source references; they do not independently verify every claim |
 
 ---
 
@@ -46,7 +46,7 @@ Millions of Indian citizens are unaware of or unable to access government scheme
 │  shadcn/ui + Lucide   │  │  ChromaDB │  │ Gov Sources   │  │
 └───────────────────────┴──│  (Vector) │──│ MyScheme API  │──┘
                            │           │  │ India.gov.in  │
-                           └───────────┘  │ Data.gov.in   │
+                           └───────────┘  │ Curated data  │
                                           └───────────────┘
 ```
 
@@ -59,8 +59,8 @@ User Question
 [1] Classify Intent
      │ scheme_query / eligibility / document_query / general
      ▼
-[2] Retrieve Official Information
-     │ search_official_sources() + retrieve_relevant_passages()
+[2] Retrieve Available References
+     │ MyScheme / India.gov.in search + document passage retrieval
      ▼
 [3] Extract Key Facts
      │ eligibility criteria, benefits, documents, deadlines
@@ -68,8 +68,8 @@ User Question
 [4] Check Eligibility (if profile provided)
      │ analyze_scheme_eligibility()
      ▼
-[5] Verify Claims
-     │ verify_source_and_citations()
+[5] Prepare Source References
+     │ Attach links and page references when available
      ▼
 [6] Generate Response
      │ In user's language (EN/HI/TE)
@@ -103,10 +103,10 @@ User Question
 - **gTTS** (text-to-speech)
 - **deep-translator** (multilingual)
 
-### Data Sources (Official)
+### Government Portals and Reference Data
 - **MyScheme API** — `https://api.myscheme.gov.in`
 - **India.gov.in** — `https://www.india.gov.in`
-- **Data.gov.in CKAN API** — `https://data.gov.in/api/3/action`
+- **Curated registry** — bundled scheme references; not refreshed automatically
 
 ---
 

@@ -7,11 +7,12 @@ in English, Hindi, and Telugu.
 import logging
 import os
 from typing import Dict, Any
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import FileResponse
 
 from app.models.schemas import VoiceRequest, VoiceResponse
 from app.services.voice_service import VoiceService
+from app.utils.rate_limit import voice_limit, voice_capacity
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,11 @@ _voice_service = VoiceService()
 
 
 @router.post("/synthesize", response_model=VoiceResponse)
-async def synthesize_speech(request: VoiceRequest) -> VoiceResponse:
+async def synthesize_speech(
+    request: VoiceRequest,
+    _: None = Depends(voice_limit),
+    __: None = Depends(voice_capacity),
+) -> VoiceResponse:
     """Convert text to spoken MP3 audio in English, Hindi, or Telugu.
     
     Returns URL to stream the synthesized audio file.
@@ -35,11 +40,11 @@ async def synthesize_speech(request: VoiceRequest) -> VoiceResponse:
             duration_seconds=round(len(request.text.split()) / 2.5, 1),
             language=request.language,
         )
-    except Exception as e:
-        logger.error("Speech synthesis failed: %s", e)
+    except Exception:
+        logger.exception("Speech synthesis failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Speech synthesis error: {str(e)}"
+            detail="Speech synthesis is temporarily unavailable. Please try again."
         )
 
 

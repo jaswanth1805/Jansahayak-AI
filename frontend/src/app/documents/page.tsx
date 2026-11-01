@@ -21,9 +21,7 @@ import {
   HelpCircle,
   FileQuestion,
   AlertCircle,
-  PlusCircle,
-  BookOpen,
-  Languages,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -52,6 +50,7 @@ export default function DocumentsPage() {
   const [currentQuestion, setCurrentQuestion] = useState("");
   const [isQuerying, setIsQuerying] = useState(false);
   const [queryError, setQueryError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -71,14 +70,13 @@ export default function DocumentsPage() {
     setUploadError(null);
     setIsUploading(true);
     setUploadProgress(25);
-
+    let interval: ReturnType<typeof setInterval> | null = null;
     try {
-      const interval = setInterval(() => {
+      interval = setInterval(() => {
         setUploadProgress((prev) => (prev < 85 ? prev + 15 : prev));
       }, 200);
 
       const response = await api.uploadDocument(file);
-      clearInterval(interval);
       setUploadProgress(100);
 
       setDocuments((prev) => [response, ...prev]);
@@ -88,10 +86,9 @@ export default function DocumentsPage() {
       const msg = err instanceof Error ? err.message : "Failed to upload document. Please ensure backend server is running.";
       setUploadError(msg);
     } finally {
-      setTimeout(() => {
-        setIsUploading(false);
-        setUploadProgress(0);
-      }, 500);
+      if (interval) clearInterval(interval);
+      setIsUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -113,7 +110,8 @@ export default function DocumentsPage() {
     setQueryError(null);
 
     try {
-      const result = await api.queryDocument(activeDocId, questionText, language);
+      if (!activeDoc?.access_token) throw new Error("Upload this document again to restore its access token.");
+      const result = await api.queryDocument(activeDocId, activeDoc.access_token, questionText, language);
 
       const newQA: DocQuestionAnswer = {
         question: questionText,
@@ -127,67 +125,31 @@ export default function DocumentsPage() {
         [activeDocId]: [...(prev[activeDocId] || []), newQA],
       }));
     } catch (err: unknown) {
-      console.warn("Document query API failed, generating context response:", err);
-      // Smart fallback QA from extracted clauses
-      const newQA: DocQuestionAnswer = {
-        question: questionText,
-        answer: `According to **Section 4 & 7** of the uploaded circular "${activeDoc?.filename}":\n\n- The criteria specifies mandatory Aadhaar biometric linking.\n- Processing is managed by the District Level Committee.\n- Applicants must submit their verified income certificate before the final deadline.`,
-        sources: [
-          {
-            title: activeDoc?.filename || "Uploaded Circular",
-            source_type: "Uploaded PDF",
-            page_number: 3,
-            section: "Clause 7.2",
-            retrieved_at: new Date().toISOString(),
-            is_verified: true,
-          },
-        ],
-        timestamp: new Date().toISOString(),
-      };
-
-      setDocQueries((prev) => ({
-        ...prev,
-        [activeDocId]: [...(prev[activeDocId] || []), newQA],
-      }));
+      setQueryError(err instanceof Error ? err.message : "Document query failed. Please retry.");
     } finally {
       setIsQuerying(false);
     }
   };
 
-  // Helper to load sample mock document
-  const loadSampleDocument = () => {
-    const sampleDoc: DocumentUploadResponse = {
-      document_id: "sample_pm_suraksha",
-      filename: "PM-Suraksha-Bima-Yojana-Gazette-2024.pdf",
-      page_count: 5,
-      extracted_text_preview:
-        "Ministry of Finance Department of Financial Services — Pradhan Mantri Suraksha Bima Yojana (PMSBY) guidelines for universal social security accident insurance cover...",
-      key_clauses: [
-        "Clause 2: Annual premium of ₹20 deducted automatically through auto-debit in one installment.",
-        "Clause 5: Risk coverage of ₹2 Lakhs for accidental death and permanent total disability.",
-        "Clause 6: Risk coverage of ₹1 Lakh for permanent partial disability.",
-        "Clause 9: Coverage period starts from 1st June and ends on 31st May of the subsequent year.",
-      ],
-      important_dates: [
-        "Renewal Date: May 31 annually",
-        "Enrolment window: Open throughout the year via auto-debit mandate",
-      ],
-      eligibility_mentions: [
-        "Individuals between 18 to 70 years having a bank account",
-        "Aadhaar is primary KYC for the bank account",
-      ],
-      required_documents_mentioned: [
-        "Aadhaar Card",
-        "Bank Account details & Auto-debit consent form",
-      ],
-      language_detected: "English",
-      processing_notes: [
-        "Official gazette notification parsed with 100% confidence",
-      ],
-    };
-
-    setDocuments((prev) => [sampleDoc, ...prev]);
-    setActiveDocId(sampleDoc.document_id);
+  const handleDeleteDocument = async () => {
+    if (!activeDoc?.access_token || isDeleting || isQuerying) return;
+    setIsDeleting(true);
+    setUploadError(null);
+    try {
+      await api.deleteDocument(activeDoc.document_id, activeDoc.access_token);
+      const remaining = documents.filter((doc) => doc.document_id !== activeDoc.document_id);
+      setDocuments(remaining);
+      setActiveDocId(remaining[0]?.document_id || null);
+      setDocQueries((prev) => {
+        const next = { ...prev };
+        delete next[activeDoc.document_id];
+        return next;
+      });
+    } catch (err: unknown) {
+      setUploadError(err instanceof Error ? err.message : "Document deletion failed.");
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   return (
@@ -207,19 +169,6 @@ export default function DocumentsPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {documents.length === 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={loadSampleDocument}
-              className="text-xs gap-1 border-navy-200 text-navy-800 hover:bg-navy-50"
-            >
-              <BookOpen className="w-3.5 h-3.5 text-navy-700" />
-              Load Sample Circular
-            </Button>
-          )}
-        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -330,17 +279,8 @@ export default function DocumentsPage() {
                 No Document Selected
               </h3>
               <p className="text-xs text-slate-500 max-w-sm mx-auto mb-4">
-                Upload a government circular PDF or click &ldquo;Load Sample Circular&rdquo;
-                to view extracted clauses, key deadlines, and start asking questions.
+                Upload a PDF document to view extracted text and ask questions about it.
               </p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={loadSampleDocument}
-                className="text-xs"
-              >
-                Load Sample Circular
-              </Button>
             </div>
           ) : (
             <>
@@ -366,6 +306,17 @@ export default function DocumentsPage() {
                       <Badge variant="indigo" className="text-[10px]">
                         {activeDoc.language_detected || "English"}
                       </Badge>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleDeleteDocument}
+                        disabled={isDeleting || isQuerying || !activeDoc.access_token}
+                        className="h-7 gap-1 px-2 text-[10px] text-red-700"
+                      >
+                        {isDeleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                        Delete
+                      </Button>
                     </div>
                   </div>
                   {activeDoc.extracted_text_preview && (

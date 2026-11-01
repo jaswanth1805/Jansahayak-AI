@@ -1,6 +1,13 @@
 # JanSahayak AI Backend Setup and Launcher Script
-$PYTHON = "C:\Users\kanak\AppData\Local\Programs\Python\Python314\python.exe"
-$BACKEND_DIR = "C:\Users\kanak\.gemini\antigravity\scratch\jansahayak-ai\backend"
+$BACKEND_DIR = $PSScriptRoot
+$ROOT = Split-Path -Parent $BACKEND_DIR
+$VENV_PYTHON = Join-Path $ROOT ".venv\Scripts\python.exe"
+if (!(Test-Path $VENV_PYTHON)) {
+    $SYSTEM_PYTHON = (Get-Command python -ErrorAction Stop).Source
+    & $SYSTEM_PYTHON -m venv (Join-Path $ROOT ".venv")
+    if ($LASTEXITCODE -ne 0) { throw "Could not create the project virtual environment." }
+}
+$PYTHON = $VENV_PYTHON
 
 Write-Host "======================================================" -ForegroundColor Cyan
 Write-Host "   JanSahayak AI — Backend Launcher & Diagnostic     " -ForegroundColor Cyan

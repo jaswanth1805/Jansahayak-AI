@@ -7,7 +7,7 @@ along with comprehensive listings of Indian states, UTs, and scheme sectors.
 from datetime import datetime, timezone
 import logging
 from typing import List, Dict, Any
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status, Depends
 
 from app.models.schemas import (
     SchemeSearchRequest,
@@ -15,6 +15,7 @@ from app.models.schemas import (
     GovernmentScheme,
 )
 from app.services.government_sources import GovernmentSourceAggregator
+from app.utils.rate_limit import scheme_search_limit, scheme_search_capacity
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,11 @@ SCHEME_CATEGORIES = [
 
 
 @router.post("/search", response_model=SchemeSearchResponse)
-async def search_schemes(request: SchemeSearchRequest) -> SchemeSearchResponse:
+async def search_schemes(
+    request: SchemeSearchRequest,
+    _: None = Depends(scheme_search_limit),
+    __: None = Depends(scheme_search_capacity),
+) -> SchemeSearchResponse:
     """Search government welfare schemes across official portals."""
     results = await _gov_aggregator.search_all(
         query=request.query or "",
@@ -95,7 +100,7 @@ async def search_schemes(request: SchemeSearchRequest) -> SchemeSearchResponse:
     return SchemeSearchResponse(
         schemes=schemes,
         total=len(schemes),
-        source="MyScheme / India.gov.in / National Registry",
+        source=" / ".join(results.get("sources_queried", [])),
         retrieved_at=results.get("retrieved_at", datetime.now(timezone.utc)),
         warning=warning,
     )

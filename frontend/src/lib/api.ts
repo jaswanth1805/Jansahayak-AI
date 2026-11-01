@@ -15,7 +15,7 @@ export interface SourceCitation {
   source_type: string;
   page_number?: number;
   section?: string;
-  retrieved_at: string;
+  retrieved_at?: string;
   is_verified: boolean;
 }
 
@@ -46,7 +46,7 @@ export interface GovernmentScheme {
   application_url?: string;
   official_url: string;
   source: string;
-  last_verified: string;
+  last_verified?: string;
   category?: string;
 }
 
@@ -85,6 +85,7 @@ export interface EligibilityResult {
 
 export interface DocumentUploadResponse {
   document_id: string;
+  access_token?: string;
   filename: string;
   page_count: number;
   extracted_text_preview: string;
@@ -104,7 +105,10 @@ export const api = {
     message: string,
     language: Language,
     history: ChatMessage[],
-    sessionId?: string
+    sessionId?: string,
+    documentId?: string,
+    documentAccessToken?: string,
+    userProfile?: Record<string, unknown>
   ): Promise<ChatResponse> => {
     const res = await fetch(`${BACKEND_URL}/api/chat/`, {
       method: 'POST',
@@ -114,6 +118,9 @@ export const api = {
         language,
         conversation_history: history,
         session_id: sessionId,
+        document_id: documentId,
+        document_access_token: documentAccessToken,
+        user_profile: userProfile,
         include_audio: false,
       }),
     });
@@ -128,12 +135,15 @@ export const api = {
     query: string,
     state?: string,
     category?: string,
-    language: Language = 'en'
+    language: Language = 'en',
+    beneficiaryType?: string,
+    signal?: AbortSignal
   ): Promise<SchemeSearchResponse> => {
     const res = await fetch(`${BACKEND_URL}/api/schemes/search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, state, category, language }),
+      body: JSON.stringify({ query, state, category, beneficiary_type: beneficiaryType, language }),
+      signal,
     });
     if (!res.ok) {
       const errText = await res.text();
@@ -200,19 +210,31 @@ export const api = {
 
   queryDocument: async (
     documentId: string,
+    accessToken: string,
     question: string,
     language: Language
   ): Promise<{ answer: string; sources: SourceCitation[]; language: Language }> => {
     const res = await fetch(`${BACKEND_URL}/api/documents/query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ document_id: documentId, question, language }),
+      body: JSON.stringify({ document_id: documentId, access_token: accessToken, question, language }),
     });
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(errText || `Document query failed: ${res.statusText}`);
     }
     return res.json();
+  },
+
+  deleteDocument: async (documentId: string, accessToken: string): Promise<void> => {
+    const res = await fetch(`${BACKEND_URL}/api/documents/${encodeURIComponent(documentId)}`, {
+      method: 'DELETE',
+      headers: { 'X-Document-Token': accessToken },
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(errText || `Document deletion failed: ${res.statusText}`);
+    }
   },
 
   synthesizeSpeech: async (text: string, language: Language): Promise<{ audio_url: string }> => {
@@ -232,5 +254,14 @@ export const api = {
     const res = await fetch(`${BACKEND_URL}/health`);
     if (!res.ok) throw new Error('Backend unavailable');
     return res.json();
+  },
+
+  deleteChatSession: async (sessionId: string): Promise<void> => {
+    const res = await fetch(`${BACKEND_URL}/api/chat/session/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok && res.status !== 404) {
+      throw new Error(`Could not clear the server conversation (${res.status}).`);
+    }
   },
 };

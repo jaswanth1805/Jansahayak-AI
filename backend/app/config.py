@@ -7,6 +7,7 @@ using Pydantic BaseSettings, loading values from environment variables or a .env
 from functools import lru_cache
 from typing import List
 import os
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,13 +34,16 @@ class Settings(BaseSettings):
     # Server Host and Port
     BACKEND_HOST: str = "0.0.0.0"
     BACKEND_PORT: int = 8000
-    DEBUG: bool = True
+    DEBUG: bool = False
     
     # Allowed CORS Origins (comma-separated string or list)
     CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
     
     # File Upload Restrictions
-    MAX_UPLOAD_SIZE_MB: int = 20
+    MAX_UPLOAD_SIZE_MB: int = Field(default=20, ge=1, le=100)
+    MAX_PDF_PAGES: int = Field(default=200, ge=1, le=2000)
+    MAX_EXTRACTED_TEXT_CHARS: int = Field(default=1_000_000, ge=10_000, le=10_000_000)
+    DOCUMENT_RETENTION_HOURS: int = Field(default=24, ge=1, le=8760)
     UPLOAD_DIR: str = "./uploads"
     
     # Local ChromaDB Vector Store Path

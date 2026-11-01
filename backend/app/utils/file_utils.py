@@ -42,7 +42,7 @@ def validate_upload(filename: str, file_size: int) -> None:
         )
 
 
-async def save_upload(file: UploadFile, upload_dir: str) -> str:
+async def save_upload(file: UploadFile, upload_dir: str, document_id: str) -> str:
     """Save an incoming FastAPI UploadFile to the specified directory.
     
     Args:
@@ -52,22 +52,32 @@ async def save_upload(file: UploadFile, upload_dir: str) -> str:
     Returns:
         The full destination file path.
     """
+    settings = get_settings()
+    validate_upload(file.filename or "", 0)
     os.makedirs(upload_dir, exist_ok=True)
-    destination_path = os.path.join(upload_dir, file.filename)
-    
-    # Avoid file collisions by prefixing or renaming if required
-    base_name, ext = os.path.splitext(file.filename)
-    counter = 1
-    while os.path.exists(destination_path):
-        destination_path = os.path.join(upload_dir, f"{base_name}_{counter}{ext}")
-        counter += 1
-        
-    content = await file.read()
-    with open(destination_path, "wb") as buffer:
-        buffer.write(content)
-        
-    logger.info("Saved upload to %s (%d bytes)", destination_path, len(content))
-    return destination_path
+    from app.services.document_registry import document_file_path
+    destination_path = str(document_file_path(document_id))
+    total_size = 0
+    try:
+        with open(destination_path, "xb") as buffer:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > settings.max_upload_size_bytes:
+                    raise HTTPException(status_code=413, detail="Uploaded file exceeds configured size limit.")
+                buffer.write(chunk)
+        if total_size == 0:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+        logger.info("Saved uploaded PDF (%d bytes)", total_size)
+        return destination_path
+    except Exception:
+        try:
+            os.remove(destination_path)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def extract_text_from_pdf(file_path: str) -> Dict[str, Any]:
@@ -101,6 +111,10 @@ def extract_text_from_pdf(file_path: str) -> Dict[str, Any]:
         raise ValueError(f"Corrupted or invalid PDF file: {err}") from err
         
     total_pages = len(doc)
+    max_pages = get_settings().MAX_PDF_PAGES
+    if total_pages > max_pages:
+        doc.close()
+        raise HTTPException(status_code=413, detail=f"PDF page count exceeds limit ({max_pages}).")
     
     for page_idx in range(total_pages):
         page_num = page_idx + 1
@@ -120,6 +134,9 @@ def extract_text_from_pdf(file_path: str) -> Dict[str, Any]:
                 used_ocr = True
             
         total_chars += len(extracted_text)
+        if total_chars > get_settings().MAX_EXTRACTED_TEXT_CHARS:
+            doc.close()
+            raise HTTPException(status_code=413, detail="Extracted PDF text exceeds configured size limit.")
         pages_data.append({
             "page_num": page_num,
             "text": extracted_text,
@@ -161,13 +178,14 @@ def _run_page_ocr(page) -> str:
         img_bytes = pix.tobytes("png")
         image = Image.open(io.BytesIO(img_bytes))
         
-        # Run OCR with English and Hindi if available in tesseract
-        try:
-            text = pytesseract.image_to_string(image, lang="eng+hin")
-        except Exception:
-            text = pytesseract.image_to_string(image, lang="eng")
-            
-        return text.strip()
+        for languages in ("eng+hin+tel", "eng+tel", "eng+hin", "eng"):
+            try:
+                text = pytesseract.image_to_string(image, lang=languages)
+                if text.strip():
+                    return text.strip()
+            except Exception:
+                continue
+        return ""
     except Exception as ocr_err:
         logger.info("Local pytesseract OCR not active or executable missing: %s", ocr_err)
         return ""
@@ -189,9 +207,20 @@ def cleanup_old_files(upload_dir: str, max_age_hours: int = 24) -> int:
     now = time.time()
     cutoff = now - (max_age_hours * 3600)
     removed_count = 0
+    try:
+        from app.services.document_registry import registered_document_ids
+        registered_ids = registered_document_ids()
+    except Exception:
+        registered_ids = None
     
     for filename in os.listdir(upload_dir):
+        if filename.startswith("."):
+            continue
         file_path = os.path.join(upload_dir, filename)
+        if filename.lower().endswith(".pdf") and (
+            registered_ids is None or filename[:-4] in registered_ids
+        ):
+            continue
         if os.path.isfile(file_path):
             try:
                 if os.path.getmtime(file_path) < cutoff:

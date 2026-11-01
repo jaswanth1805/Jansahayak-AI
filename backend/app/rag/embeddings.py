@@ -35,7 +35,7 @@ def get_chroma_client() -> chromadb.ClientAPI:
     return _CHROMA_CLIENT
 
 
-def get_embedding_function():
+def _get_embedding_function_with_identity():
     """Return an embedding function for ChromaDB.
     
     Prefers OpenAI text-embedding-3-small if OPENAI_API_KEY is configured.
@@ -46,16 +46,42 @@ def get_embedding_function():
     if settings.OPENAI_API_KEY and settings.OPENAI_API_KEY.strip() and not settings.OPENAI_API_KEY.startswith("your_"):
         try:
             from chromadb.utils import embedding_functions
-            return embedding_functions.OpenAIEmbeddingFunction(
-                api_key=settings.OPENAI_API_KEY,
-                model_name=settings.EMBEDDING_MODEL
+            return (
+                embedding_functions.OpenAIEmbeddingFunction(
+                    api_key=settings.OPENAI_API_KEY,
+                    model_name=settings.EMBEDDING_MODEL,
+                ),
+                f"openai:{settings.EMBEDDING_MODEL}:1536",
             )
         except Exception as err:
             logger.warning("Failed to initialize OpenAI embedding function: %s. Using default.", err)
             
     # Default local embedding function (all-MiniLM-L6-v2)
     from chromadb.utils import embedding_functions
-    return embedding_functions.DefaultEmbeddingFunction()
+    return embedding_functions.DefaultEmbeddingFunction(), "chromadb-default:all-MiniLM-L6-v2:384"
+
+
+def get_embedding_function():
+    """Return the configured embedding implementation."""
+    return _get_embedding_function_with_identity()[0]
+
+
+def _ensure_embedding_compatible(collection, identity: str) -> None:
+    metadata = dict(collection.metadata or {})
+    stored_identity = metadata.get("embedding_identity")
+    if stored_identity and stored_identity != identity:
+        raise RuntimeError(
+            "This vector collection was created with a different embedding model. "
+            "Reindex the collection with the configured model before searching or adding data."
+        )
+    if not stored_identity:
+        if collection.count() > 0:
+            raise RuntimeError(
+                "This existing vector collection has no embedding model metadata. "
+                "Reindex it before searching or adding data to avoid mixing embeddings."
+            )
+        metadata["embedding_identity"] = identity
+        collection.modify(metadata=metadata)
 
 
 def chunk_text(text: str, chunk_size: int = 800, chunk_overlap: int = 100) -> List[str]:
@@ -104,13 +130,14 @@ def get_or_create_collection(collection_name: str) -> chromadb.Collection:
     """
     client = get_chroma_client()
     safe_name = sanitize_collection_name(collection_name)
-    embed_fn = get_embedding_function()
-    
-    return client.get_or_create_collection(
+    embed_fn, identity = _get_embedding_function_with_identity()
+    collection = client.get_or_create_collection(
         name=safe_name,
         embedding_function=embed_fn,
-        metadata={"description": "JanSahayak policy and document chunks"}
+        metadata={"description": "JanSahayak policy and document chunks", "embedding_identity": identity}
     )
+    _ensure_embedding_compatible(collection, identity)
+    return collection
 
 
 def add_documents_to_collection(
@@ -186,10 +213,15 @@ def search_collection(
     safe_name = sanitize_collection_name(collection_name)
     
     try:
+        embed_fn, identity = _get_embedding_function_with_identity()
         collection = client.get_collection(
             name=safe_name,
-            embedding_function=get_embedding_function()
+            embedding_function=embed_fn
         )
+        _ensure_embedding_compatible(collection, identity)
+    except RuntimeError:
+        # Do not hide an embedding-model mismatch as an empty search result.
+        raise
     except Exception as e:
         logger.warning("Collection '%s' not found for search: %s", safe_name, e)
         return []
@@ -219,8 +251,9 @@ def search_collection(
             formatted_results.append({
                 "text": doc,
                 "metadata": meta,
+                # Chroma distances are metric/model dependent and are not a
+                # calibrated probability. Expose the raw distance only.
                 "distance": dist,
-                "confidence": max(0.0, round(1.0 - (dist if dist <= 1.0 else 0.5), 2)),
                 "id": doc_id,
             })
             
@@ -235,9 +268,13 @@ def delete_collection(collection_name: str) -> bool:
     client = get_chroma_client()
     safe_name = sanitize_collection_name(collection_name)
     try:
+        existing = get_chroma_client().list_collections()
+        existing_names = {getattr(item, "name", item) for item in existing}
+        if safe_name not in existing_names:
+            return True
         client.delete_collection(name=safe_name)
         logger.info("Deleted ChromaDB collection '%s'", safe_name)
         return True
     except Exception as err:
-        logger.debug("Collection '%s' did not exist or could not be deleted: %s", safe_name, err)
+        logger.warning("Could not delete ChromaDB collection '%s': %s", safe_name, err)
         return False

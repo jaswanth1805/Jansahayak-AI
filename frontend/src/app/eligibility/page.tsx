@@ -69,16 +69,16 @@ function EligibilityWizard() {
 
   // Step 2 profile
   const [age, setAge] = useState<number | "">("");
-  const [state, setState] = useState<string>("Delhi");
-  const [gender, setGender] = useState<string>("Male");
-  const [occupation, setOccupation] = useState<string>("Farmer");
+  const [state, setState] = useState<string>("");
+  const [gender, setGender] = useState<string>("");
+  const [occupation, setOccupation] = useState<string>("");
 
   // Step 3 financial
   const [annualIncome, setAnnualIncome] = useState<number | "">("");
-  const [isBPL, setIsBPL] = useState<boolean>(false);
+  const [isBPL, setIsBPL] = useState<boolean | undefined>(undefined);
 
   // Step 4 additional details
-  const [isStudent, setIsStudent] = useState<boolean>(false);
+  const [isStudent, setIsStudent] = useState<boolean | undefined>(undefined);
   const [educationLevel, setEducationLevel] = useState<string>("Undergraduate");
   const [landHoldingAcres, setLandHoldingAcres] = useState<number | "">("");
   const [hasBusinessRegistration, setHasBusinessRegistration] = useState<boolean>(false);
@@ -97,17 +97,21 @@ function EligibilityWizard() {
   }, [searchParams]);
 
   const handleRunAssessment = async () => {
+    if (age === '' || !state || !gender || !occupation || annualIncome === '' || isStudent === undefined || isBPL === undefined) {
+      setError('Please provide your age, state, gender, occupation, annual household income, student status, and BPL status before running the assessment.');
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
-
     const profile: EligibilityProfile = {
-      age: typeof age === "number" ? age : 30,
+      age,
       state,
       gender,
       occupation,
-      annual_income: typeof annualIncome === "number" ? annualIncome : 180000,
-      is_student: isStudent || occupation === "Student",
-      is_employed: occupation !== "Unemployed",
+      annual_income: annualIncome,
+      is_student: isStudent || occupation === 'Student',
+      is_employed: occupation !== 'Unemployed',
       additional_info: {
         is_bpl: isBPL,
         education_level: educationLevel,
@@ -119,123 +123,17 @@ function EligibilityWizard() {
     try {
       const response = await api.checkEligibility(
         profile,
-        schemeQuery || "Central welfare schemes",
+        schemeQuery,
         language
       );
       setResults(response);
       setStep(5);
     } catch (err: unknown) {
-      console.warn("Backend eligibility API failed, computing offline evaluation:", err);
-      // Smart offline fallback logic so users get a full, highly informative demo
-      const incomeVal = typeof annualIncome === "number" ? annualIncome : 180000;
-      const isEligibleForPMAY = incomeVal <= 600000;
-      const isFarmer = occupation.toLowerCase().includes("farmer");
-
-      const mockResults: EligibilityResult[] = [
-        {
-          scheme: {
-            id: "pm-kisan-demo",
-            name: "Pradhan Mantri Kisan Samman Nidhi (PM-KISAN)",
-            description:
-              "Central income support scheme providing ₹6,000 annually to landholding farmer families.",
-            official_url: "https://pmkisan.gov.in",
-            source: "myScheme.gov.in",
-            last_verified: new Date().toISOString(),
-            beneficiary_types: ["Farmers"],
-            benefits: ["₹6,000 yearly in 3 DBT installments of ₹2,000 each"],
-            eligibility_criteria: [
-              "Applicant must be an operational agricultural landholder",
-              "Aadhaar card must be linked to active bank account",
-              "Family must not contain institutional or high-tax individuals",
-            ],
-            required_documents: ["Aadhaar Card", "Land Khatauni / Record of Rights", "Bank Passbook"],
-          },
-          status: isFarmer ? "likely_eligible" : "not_eligible",
-          satisfied_conditions: isFarmer
-            ? ["Identified as farmer occupation", "Resident of specified state: " + state]
-            : ["State criteria satisfied"],
-          unsatisfied_conditions: !isFarmer
-            ? ["Selected occupation is not an agricultural landholding farmer"]
-            : [],
-          missing_information: [
-            "Land revenue record verification (Khata/Khasra number)",
-            "Aadhaar-NPCI DBT linking confirmation",
-          ],
-          required_documents: [
-            "Aadhaar Card",
-            "Land Ownership Document (Khatauni)",
-            "Bank Passbook Copy",
-          ],
-          application_steps: [
-            "Visit the official PM-KISAN portal (pmkisan.gov.in)",
-            "Click on 'New Farmer Registration'",
-            "Enter your Aadhaar number and verify via OTP",
-            "Fill in land identification details and bank account numbers",
-            "Submit application and note your registration acknowledgement number",
-          ],
-          disclaimer:
-            "This is a preliminary assessment. Final eligibility is determined by the concerned government authority upon document verification.",
-          sources: [
-            {
-              title: "PM-KISAN Operational Guidelines",
-              url: "https://pmkisan.gov.in",
-              source_type: "Official Portal",
-              retrieved_at: new Date().toISOString(),
-              is_verified: true,
-            },
-          ],
-        },
-        {
-          scheme: {
-            id: "pmay-demo",
-            name: "Pradhan Mantri Awas Yojana (PMAY)",
-            description:
-              "Credit Linked Subsidy and housing assistance for urban and rural families without a pucca house.",
-            official_url: "https://pmaymis.gov.in",
-            source: "myScheme.gov.in",
-            last_verified: new Date().toISOString(),
-            beneficiary_types: ["EWS / LIG Families"],
-            benefits: ["Subsidized interest rate up to ₹2.67 Lakhs on housing loans"],
-            eligibility_criteria: [
-              "Household income must fit EWS/LIG income brackets",
-              "Family must not own a pucca dwelling anywhere in India",
-            ],
-            required_documents: ["Income Certificate", "Aadhaar Card", "Bank Statements"],
-          },
-          status: isEligibleForPMAY ? "likely_eligible" : "possibly_eligible",
-          satisfied_conditions: [
-            `Annual income of ₹${annualIncome || "1,80,000"} qualifies within income parameters`,
-            `Resident of ${state}`,
-          ],
-          unsatisfied_conditions: [],
-          missing_information: ["Affidavit stating no existing pucca house in applicant name"],
-          required_documents: ["Income Proof", "Aadhaar Card", "Salary/Income Certificate"],
-          application_steps: [
-            "Visit PMAY portal or your nearest Common Service Centre (CSC)",
-            "Choose 'Apply for Citizen Assessment'",
-            "Submit Aadhaar identification details and household income proof",
-          ],
-          disclaimer:
-            "This is a preliminary assessment. Final eligibility is determined by the concerned government authority.",
-          sources: [
-            {
-              title: "Ministry of Housing & Urban Affairs Guidelines",
-              url: "https://pmaymis.gov.in",
-              source_type: "Ministry Circular",
-              retrieved_at: new Date().toISOString(),
-              is_verified: true,
-            },
-          ],
-        },
-      ];
-
-      setResults(mockResults);
-      setStep(5);
+      setError(err instanceof Error ? err.message : 'Eligibility assessment failed. Please retry.');
     } finally {
       setIsLoading(false);
     }
   };
-
   const getStatusBadge = (status: EligibilityResult["status"]) => {
     switch (status) {
       case "likely_eligible":
@@ -521,7 +419,7 @@ function EligibilityWizard() {
                     onClick={() => setIsBPL(false)}
                     className={cn(
                       "flex-1 py-2.5 px-4 rounded-lg border text-xs font-semibold transition text-center",
-                      !isBPL
+                      isBPL === false
                         ? "bg-navy-700 text-white border-navy-700 shadow-xs"
                         : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
                     )}
@@ -664,6 +562,7 @@ function EligibilityWizard() {
                   </>
                 )}
               </Button>
+              {error && <p role="alert" className="text-xs text-red-700">{error}</p>}
             </CardFooter>
           </div>
         )}
@@ -681,7 +580,7 @@ function EligibilityWizard() {
                     Eligibility Analysis Report
                   </CardTitle>
                   <CardDescription className="text-xs">
-                    Evaluated profile for: {state} • Age {age || 30} • {occupation} • Income ₹{annualIncome || "1,80,000"}
+                    Evaluated profile for: {state} • Age {age} • {occupation} • Income ₹{annualIncome}
                   </CardDescription>
                 </div>
                 <Button
@@ -820,6 +719,11 @@ function EligibilityWizard() {
                   </div>
                 </div>
               ))}
+              {results.length === 0 && (
+                <p className="rounded-lg bg-amber-50 p-4 text-sm text-amber-900" role="status">
+                  No schemes matched the supplied filters. Try a broader scheme search or check the official portal.
+                </p>
+              )}
             </CardContent>
           </div>
         )}

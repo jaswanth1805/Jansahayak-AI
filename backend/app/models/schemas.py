@@ -6,7 +6,7 @@ Schemas ensure strong data typing, validation, and automated OpenAPI documentati
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from pydantic import BaseModel, Field
 
 
@@ -24,8 +24,8 @@ class Language(str, Enum):
 
 class ChatMessage(BaseModel):
     """A single turn in a multi-turn conversation history."""
-    role: str = Field(..., description="'user' or 'assistant'")
-    content: str = Field(..., description="The message content text")
+    role: Literal["user", "assistant"] = Field(..., description="Message speaker")
+    content: str = Field(..., min_length=1, max_length=4000, description="The message content text")
     timestamp: Optional[datetime] = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="Timestamp when the message was sent or received"
@@ -34,19 +34,29 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     """Request payload for JanSahayak conversational AI endpoint."""
-    message: str = Field(..., description="User query or message in natural language")
+    message: str = Field(..., min_length=1, max_length=4000, description="User query or message in natural language")
     language: Language = Field(default=Language.ENGLISH, description="Preferred language for conversation")
     conversation_history: List[ChatMessage] = Field(
         default_factory=list,
+        max_length=30,
         description="Prior conversation history for context preservation"
     )
     session_id: Optional[str] = Field(
         default=None,
+        max_length=128,
         description="Optional session tracking identifier"
     )
     document_id: Optional[str] = Field(
         default=None,
         description="Optional document ID if conversation is scoped to an uploaded PDF"
+    )
+    document_access_token: Optional[str] = Field(
+        default=None,
+        description="Upload-scoped capability token required for document-scoped chat",
+    )
+    user_profile: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional eligibility profile, validated by EligibilityProfile before assessment",
     )
     include_audio: bool = Field(
         default=False,
@@ -55,7 +65,7 @@ class ChatRequest(BaseModel):
 
 
 class SourceCitation(BaseModel):
-    """Official citation metadata supporting any claim made by JanSahayak."""
+    """Source-reference metadata attached to a response."""
     title: str = Field(..., description="Title of the source or document")
     url: Optional[str] = Field(default=None, description="Direct URL to official portal or PDF")
     source_type: str = Field(
@@ -64,11 +74,11 @@ class SourceCitation(BaseModel):
     )
     page_number: Optional[int] = Field(default=None, description="Page number if derived from a document")
     section: Optional[str] = Field(default=None, description="Section heading or clause identifier")
-    retrieved_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+    retrieved_at: Optional[datetime] = Field(
+        default=None,
         description="Timestamp of source retrieval"
     )
-    is_verified: bool = Field(default=True, description="Whether source authenticity is verified")
+    is_verified: bool = Field(default=False, description="Whether source authenticity is verified")
 
 
 class ChatResponse(BaseModel):
@@ -77,7 +87,7 @@ class ChatResponse(BaseModel):
     language: Language = Field(..., description="Language in which response is formulated")
     sources: List[SourceCitation] = Field(
         default_factory=list,
-        description="Verified government citations backing the answer"
+        description="Available source references for the answer; references do not independently verify every claim"
     )
     agent_steps: List[str] = Field(
         default_factory=list,
@@ -112,9 +122,9 @@ class GovernmentScheme(BaseModel):
     application_url: Optional[str] = Field(default=None, description="Online portal URL to apply")
     official_url: str = Field(..., description="Official government scheme information portal URL")
     source: str = Field(..., description="Source system e.g. 'myscheme', 'india_gov', 'data_gov'")
-    last_verified: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
-        description="Last verified timestamp"
+    last_verified: Optional[datetime] = Field(
+        default=None,
+        description="Last fetched from a live source; curated records have no fetch timestamp"
     )
     category: Optional[str] = Field(default=None, description="Scheme sector/category e.g. 'Agriculture', 'Education'")
 
@@ -142,10 +152,10 @@ class SchemeSearchResponse(BaseModel):
 
 class EligibilityProfile(BaseModel):
     """Citizen demographic and socio-economic profile for scheme matching."""
-    age: Optional[int] = Field(default=None, description="Age in years")
-    state: Optional[str] = Field(default=None, description="Resident Indian state")
-    occupation: Optional[str] = Field(default=None, description="Occupation (e.g., 'farmer', 'student', 'artisan')")
-    annual_income: Optional[float] = Field(default=None, description="Annual household income in INR")
+    age: Optional[int] = Field(default=None, ge=0, le=120, description="Age in years")
+    state: Optional[str] = Field(default=None, max_length=100, description="Resident Indian state")
+    occupation: Optional[str] = Field(default=None, max_length=120, description="Occupation (e.g., 'farmer', 'student', 'artisan')")
+    annual_income: Optional[float] = Field(default=None, ge=0, description="Annual household income in INR")
     is_student: Optional[bool] = Field(default=None, description="Whether currently enrolled as a student")
     is_employed: Optional[bool] = Field(default=None, description="Current employment status")
     gender: Optional[str] = Field(default=None, description="'female', 'male', 'transgender', 'other'")
@@ -185,6 +195,10 @@ class EligibilityResult(BaseModel):
 class DocumentUploadResponse(BaseModel):
     """Metadata and initial extraction summary of an uploaded government document."""
     document_id: str = Field(..., description="Unique document UUID")
+    access_token: Optional[str] = Field(
+        default=None,
+        description="Upload-scoped capability token. Keep private; required to query or delete this document.",
+    )
     filename: str = Field(..., description="Original filename of the uploaded file")
     page_count: int = Field(..., description="Total number of pages processed")
     extracted_text_preview: str = Field(..., description="Preview snippet of extracted text")
@@ -204,7 +218,8 @@ class DocumentUploadResponse(BaseModel):
 class DocumentQueryRequest(BaseModel):
     """Citizen query directed to an uploaded policy/guideline PDF."""
     document_id: str = Field(..., description="ID of the previously uploaded document")
-    question: str = Field(..., description="Citizen's question regarding the document")
+    access_token: str = Field(..., min_length=32, description="Upload-scoped document capability token")
+    question: str = Field(..., min_length=1, max_length=2000, description="Citizen's question regarding the document")
     language: Language = Field(default=Language.ENGLISH, description="Preferred language for the answer")
 
 
@@ -213,7 +228,7 @@ class DocumentQueryResponse(BaseModel):
     answer: str = Field(..., description="Simplified citizen-friendly answer")
     relevant_passages: List[Dict[str, Any]] = Field(
         default_factory=list,
-        description="Passages with page numbers and confidence scores"
+        description="Retrieved passages with page metadata and raw vector distances"
     )
     sources: List[SourceCitation] = Field(default_factory=list, description="Document page citations")
     language: Language = Field(..., description="Language of response")
@@ -221,7 +236,7 @@ class DocumentQueryResponse(BaseModel):
 
 class VoiceRequest(BaseModel):
     """Request to convert citizen-facing text to synthesized audio."""
-    text: str = Field(..., description="Text to synthesize")
+    text: str = Field(..., min_length=1, max_length=4000, description="Text to synthesize")
     language: Language = Field(default=Language.ENGLISH, description="Spoken language")
 
 
