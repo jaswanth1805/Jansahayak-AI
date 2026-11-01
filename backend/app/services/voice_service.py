@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import re
 import time
 from typing import Optional
 from gtts import gTTS
@@ -34,6 +35,20 @@ class VoiceService:
             return "te"
         return "en"
 
+    def _clean_for_speech(self, text: str) -> str:
+        """Strip markdown syntax and raw URLs to produce clean, natural spoken speech."""
+        # Replace [text](url) with just text
+        t = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+        # Remove URLs
+        t = re.sub(r'http[s]?://\S+', '', t)
+        # Remove markdown symbols: #, *, `, _, ~, >, |
+        t = re.sub(r'[#*`_~>|]', '', t)
+        # Remove common emojis
+        t = re.sub(r'[💡💰🎯📄📝📋🌾🎓🔊🔍✨]', '', t)
+        # Normalize whitespace
+        t = re.sub(r'\s+', ' ', t).strip()
+        return t
+
     async def text_to_speech(self, text: str, language: str = "en") -> str:
         """Synthesize text into an MP3 audio file.
         
@@ -44,13 +59,13 @@ class VoiceService:
         Returns:
             Relative endpoint URL path to retrieve the audio (e.g. '/api/voice/audio/<id>').
         """
-        clean_text = text.strip()
+        clean_text = self._clean_for_speech(text)
         if not clean_text:
-            raise ValueError("Cannot synthesize empty text.")
+            clean_text = text.strip() or "Here is the information you requested."
 
         # Limit text length for TTS to prevent excessive processing
-        if len(clean_text) > 1000:
-            clean_text = clean_text[:1000] + "..."
+        if len(clean_text) > 800:
+            clean_text = clean_text[:800] + "..."
 
         target_lang = self._get_lang_code(language)
         

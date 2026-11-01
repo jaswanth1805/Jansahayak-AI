@@ -353,7 +353,7 @@ export default function AssistantPage() {
               key={index}
               message={msg}
               onSelectSuggestion={(s) => sendMessage(s, language, undefined, uploadedDoc?.document_id)}
-              onPlayAudio={(url) => playAudio(url)}
+              onPlayAudio={(url, text, lang) => playAudio(url, text, lang)}
               isPlayingAudio={isPlaying}
             />
           ))}

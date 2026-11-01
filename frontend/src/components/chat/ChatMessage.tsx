@@ -21,13 +21,13 @@ import {
   Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { api } from "@/lib/api";
+import { api, Language } from "@/lib/api";
 import { useLanguage } from "@/context/LanguageContext";
 
 interface ChatMessageProps {
   message: ExtendedChatMessage;
   onSelectSuggestion?: (suggestion: string) => void;
-  onPlayAudio?: (url: string) => void;
+  onPlayAudio?: (url: string, fallbackText?: string, lang?: Language) => void;
   isPlayingAudio?: boolean;
 }
 
@@ -51,21 +51,24 @@ export function ChatMessage({
 
     const currentUrl = localAudioUrl || message.audio_url;
     if (currentUrl) {
-      if (onPlayAudio) onPlayAudio(currentUrl);
+      if (onPlayAudio) onPlayAudio(currentUrl, message.content, language as Language);
       return;
     }
 
     // Synthesize audio on demand if not pre-generated
     try {
       setIsSynthesizing(true);
-      const res = await api.synthesizeSpeech(message.content, language);
+      const res = await api.synthesizeSpeech(message.content, language as Language);
       if (res && res.audio_url) {
         setLocalAudioUrl(res.audio_url);
         message.audio_url = res.audio_url;
-        if (onPlayAudio) onPlayAudio(res.audio_url);
+        if (onPlayAudio) onPlayAudio(res.audio_url, message.content, language as Language);
+      } else {
+        if (onPlayAudio) onPlayAudio("", message.content, language as Language);
       }
     } catch (e) {
-      console.error("Audio synthesis error:", e);
+      console.warn("Backend audio synthesis error, using direct browser TTS:", e);
+      if (onPlayAudio) onPlayAudio("", message.content, language as Language);
     } finally {
       setIsSynthesizing(false);
     }

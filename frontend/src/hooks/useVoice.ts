@@ -169,10 +169,49 @@ export function useVoice(language: Language = "en") {
   }, []);
 
   const playAudio = useCallback(
-    async (url: string) => {
+    async (url: string, fallbackText?: string, langCode: Language = language) => {
       stopAudio();
+      if (!url && !fallbackText) return;
+
+      const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+      const fullUrl = url
+        ? (url.startsWith("http") ? url : `${BACKEND_URL}${url}`)
+        : "";
+
+      const speakBrowserFallback = () => {
+        if (typeof window !== "undefined" && "speechSynthesis" in window && fallbackText) {
+          try {
+            window.speechSynthesis.cancel();
+            // Clean markdown syntax for speech
+            const clean = fallbackText
+              .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+              .replace(/https?:\/\/\S+/g, "")
+              .replace(/[#*`_~>|]/g, "")
+              .replace(/[💡💰🎯📄📝📋🌾🎓🔊🔍✨]/g, "")
+              .replace(/\s+/g, " ")
+              .trim();
+            const utterance = new SpeechSynthesisUtterance(clean.slice(0, 800));
+            utterance.lang = getSpeechLang(langCode);
+            utterance.onstart = () => setIsPlaying(true);
+            utterance.onend = () => setIsPlaying(false);
+            utterance.onerror = () => setIsPlaying(false);
+            window.speechSynthesis.speak(utterance);
+          } catch (e) {
+            console.error("Browser speech synthesis error:", e);
+            setIsPlaying(false);
+          }
+        } else {
+          setIsPlaying(false);
+        }
+      };
+
+      if (!fullUrl) {
+        speakBrowserFallback();
+        return;
+      }
+
       try {
-        const audio = new Audio(url);
+        const audio = new Audio(fullUrl);
         audioRef.current = audio;
         setIsPlaying(true);
 
@@ -181,19 +220,17 @@ export function useVoice(language: Language = "en") {
         };
 
         audio.onerror = (e) => {
-          console.error("Audio playback error:", e);
-          setIsPlaying(false);
-          setError("Failed to play audio.");
+          console.warn("Audio file playback error, falling back to browser SpeechSynthesis:", e);
+          speakBrowserFallback();
         };
 
         await audio.play();
       } catch (err: unknown) {
-        console.error("Error playing audio:", err);
-        setIsPlaying(false);
-        setError("Playback failed or was blocked by browser.");
+        console.warn("Direct audio.play() blocked, attempting browser SpeechSynthesis:", err);
+        speakBrowserFallback();
       }
     },
-    [stopAudio]
+    [stopAudio, getSpeechLang, language]
   );
 
   const speakText = useCallback(
